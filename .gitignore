@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# Except agents and skills
+!agents/
+!agents/**
+!skills/
+!skills/**
+!.gitignore
