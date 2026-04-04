@@ -41,75 +41,63 @@ When this skill is invoked:
 2. **Search Reddit** using the public JSON API (no auth needed). For each subreddit + query combination, fetch results:
 
 ```
-https://www.reddit.com/r/{subreddit}/search.json?q={query}&restrict_sr=1&sort=relevance&t=year&limit=10
+https://www.reddit.com/r/{subreddit}/search.json?q={query}&restrict_sr=1&sort=new&t=week&limit=10
 ```
 
-Use a `User-Agent: RedditSearch/1.0` header. Add a 500ms delay between requests to avoid rate limiting.
+Use a `User-Agent: RedditSearch/1.0` header. Add a 600ms delay between requests to avoid rate limiting.
 
 If searching across all of Reddit (no specific subreddit):
 ```
-https://www.reddit.com/search.json?q={query}&sort=relevance&t=year&limit=15
+https://www.reddit.com/search.json?q={query}&sort=new&t=week&limit=15
 ```
 
-3. **Use Playwright browser_run_code** to execute the searches (this avoids CORS issues):
+**Default: sort by `new`, time filter `week`.** After fetching, filter results to only include posts from the last 3 days (compare `created_utc` against current time). If the user explicitly asks for older posts, adjust the time filter accordingly (`t=month`, `t=year`, `t=all`).
+
+3. **Use Playwright `browser_run_code`** to execute the searches. Important notes:
+   - Do NOT use `page.evaluate()` with `fetch()` — Reddit returns 403 for in-browser fetches
+   - Use `page.request.get()` instead — this is Playwright's API request context which bypasses CORS/browser restrictions
+   - Do NOT use `setTimeout` — it's not available in the Playwright MCP sandbox. Use `page.waitForTimeout()` instead
 
 ```javascript
 async (page) => {
   const results = [];
   const subreddits = ['sub1', 'sub2', ...];
   const queries = ['query1', 'query2'];
-  
+
+  async function search(url) {
+    try {
+      const resp = await page.request.get(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
+      if (resp.ok()) {
+        const data = await resp.json();
+        for (const c of (data?.data?.children ?? [])) {
+          results.push({
+            subreddit: c.data.subreddit, title: c.data.title, score: c.data.score,
+            num_comments: c.data.num_comments, permalink: 'https://reddit.com' + c.data.permalink,
+            selftext: (c.data.selftext || '').slice(0, 200), created_utc: c.data.created_utc, author: c.data.author,
+          });
+        }
+      }
+    } catch(e) {}
+  }
+
   for (const query of queries) {
-    // Search across all of Reddit first
-    const allUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&t=year&limit=15`;
-    const allResp = await page.evaluate(async (url) => {
-      const r = await fetch(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
-      if (!r.ok) return [];
-      const data = await r.json();
-      return (data?.data?.children ?? []).map(c => ({
-        subreddit: c.data.subreddit,
-        title: c.data.title,
-        score: c.data.score,
-        num_comments: c.data.num_comments,
-        permalink: 'https://reddit.com' + c.data.permalink,
-        selftext: (c.data.selftext || '').slice(0, 200),
-        created_utc: c.data.created_utc,
-        author: c.data.author,
-      }));
-    }, allUrl);
-    results.push(...allResp);
+    // Search across all of Reddit first (sort=new, t=week)
+    await search(`https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=new&t=week&limit=15`);
+    await page.waitForTimeout(600);
 
     // Then search specific subreddits
     for (const sub of subreddits) {
-      const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=relevance&t=year&limit=10`;
-      const resp = await page.evaluate(async (url) => {
-        const r = await fetch(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
-        if (!r.ok) return [];
-        const data = await r.json();
-        return (data?.data?.children ?? []).map(c => ({
-          subreddit: c.data.subreddit,
-          title: c.data.title,
-          score: c.data.score,
-          num_comments: c.data.num_comments,
-          permalink: 'https://reddit.com' + c.data.permalink,
-          selftext: (c.data.selftext || '').slice(0, 200),
-          created_utc: c.data.created_utc,
-          author: c.data.author,
-        }));
-      }, url);
-      results.push(...resp);
-      await new Promise(r => setTimeout(r, 500));
+      await search(`https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=new&t=week&limit=10`);
+      await page.waitForTimeout(600);
     }
   }
-  
-  // Deduplicate by permalink and sort by score
+
+  // Filter to last 3 days, deduplicate, sort newest first
+  const threeDaysAgo = (Date.now() / 1000) - (3 * 24 * 60 * 60);
+  const recent = results.filter(p => p.created_utc >= threeDaysAgo);
   const seen = new Set();
-  const unique = results.filter(p => {
-    if (seen.has(p.permalink)) return false;
-    seen.add(p.permalink);
-    return true;
-  });
-  unique.sort((a, b) => b.score - a.score);
+  const unique = recent.filter(p => { if (seen.has(p.permalink)) return false; seen.add(p.permalink); return true; });
+  unique.sort((a, b) => b.created_utc - a.created_utc);
   return JSON.stringify(unique.slice(0, 25));
 }
 ```

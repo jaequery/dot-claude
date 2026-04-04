@@ -55,7 +55,11 @@ When this skill is invoked:
 2. **Extract post ID**: Parse the URL to get the post ID in `t3_xxxxx` format.
    - Pattern: `reddit.com/r/*/comments/<id>/` → `t3_<id>`
 
-3. **Post the comment** using this Playwright browser_run_code pattern:
+3. **Post the comment** using this Playwright browser_run_code pattern.
+
+   **Playwright MCP gotchas:**
+   - Do NOT use `setTimeout` — it's not available in the Playwright MCP sandbox. Use `page.waitForTimeout()` instead.
+   - `page.evaluate()` with `fetch()` works here because we're POSTing to `oauth.reddit.com` (same-origin from the Reddit page). It does NOT work for GETting Reddit's JSON API (returns 403) — use `page.request.get()` for that (see reddit-find-posts skill).
 
 ```javascript
 async (page) => {
