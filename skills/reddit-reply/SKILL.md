@@ -60,28 +60,36 @@ When this skill is invoked:
 
 ```javascript
 async (page) => {
+  const url = '<REDDIT_POST_URL>';
+  const comment = '<COMMENT_TEXT>';
+
   // Step 1: Navigate and wait for full page load
-  await page.goto('<REDDIT_POST_URL>');
+  await page.goto(url);
   await page.waitForTimeout(3000);
 
-  // Step 2: Click the "Join the conversation" textbox to activate the composer
-  // This is a collapsed input that expands into a rich text editor when clicked.
+  // Step 2: Get the post title and date for the summary
+  const title = await page.locator('h1[id^="post-title"]').first().textContent().catch(() => 
+    page.title().then(t => t.replace(/ : r\/.*$/, ''))
+  );
+  const postDate = await page.locator('time').first().getAttribute('datetime').catch(() => 'unknown');
+
+  // Step 3: Click the "Join the conversation" textbox to activate the composer
   // MUST use #main-content scoping to avoid hitting the search textbox.
   const tb = page.locator('#main-content').getByRole('textbox');
   await tb.click();
   await page.waitForTimeout(1000);
 
-  // Step 3: Fill the now-visible composer textbox
-  // After clicking, the composer expands and the textbox gets aria-placeholder.
+  // Step 4: Fill the now-visible composer textbox
   const composer = page.locator('div[role="textbox"][aria-placeholder="Join the conversation"]');
-  await composer.fill('<COMMENT_TEXT>');
+  await composer.fill(comment);
   await page.waitForTimeout(500);
 
-  // Step 4: Click the Comment button to submit
+  // Step 5: Click the Comment button to submit
   await page.getByRole('button', { name: 'Comment', exact: true }).click();
   await page.waitForTimeout(2000);
 
-  return 'Comment posted';
+  // Step 6: Return structured result for the summary
+  return JSON.stringify({ title, url, comment, date: postDate });
 }
 ```
 
@@ -102,6 +110,19 @@ async (page) => {
    - If `browser_run_code` returns without error, the comment was posted successfully.
    - If the textbox click times out, the user may not be logged in. Navigate to `https://www.reddit.com/login/` and ask them to log in.
    - If you get rate limited (429 or posting fails), wait 30 seconds before retrying.
+
+5. **Show a summary after all comments are posted.** Parse the JSON returned by each `browser_run_code` call and display a table like this:
+
+```
+## Comments Posted
+
+| # | Post | Date | Comment |
+|---|------|------|---------|
+| 1 | [Post Title](url) | Apr 4, 2026 | The actual comment text that was left |
+| 2 | [Post Title](url) | Apr 3, 2026 | The actual comment text that was left |
+```
+
+Always show the actual comment text, not a description of it. The date is when the original post was created (parsed from the `datetime` attribute on the `<time>` element). This lets the user verify exactly what was posted and when.
 
 ## Writing Style — Sound Human, Not AI
 
