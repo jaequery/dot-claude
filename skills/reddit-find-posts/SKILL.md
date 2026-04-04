@@ -44,7 +44,7 @@ When this skill is invoked:
 https://www.reddit.com/r/{subreddit}/search.json?q={query}&restrict_sr=1&sort=relevance&t=year&limit=10
 ```
 
-Use a `User-Agent: TierBuddy-Search/1.0` header. Add a 500ms delay between requests to avoid rate limiting.
+Use a `User-Agent: RedditSearch/1.0` header. Add a 500ms delay between requests to avoid rate limiting.
 
 If searching across all of Reddit (no specific subreddit):
 ```
@@ -63,7 +63,7 @@ async (page) => {
     // Search across all of Reddit first
     const allUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&t=year&limit=15`;
     const allResp = await page.evaluate(async (url) => {
-      const r = await fetch(url, { headers: { 'User-Agent': 'TierBuddy-Search/1.0' } });
+      const r = await fetch(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
       if (!r.ok) return [];
       const data = await r.json();
       return (data?.data?.children ?? []).map(c => ({
@@ -83,7 +83,7 @@ async (page) => {
     for (const sub of subreddits) {
       const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=relevance&t=year&limit=10`;
       const resp = await page.evaluate(async (url) => {
-        const r = await fetch(url, { headers: { 'User-Agent': 'TierBuddy-Search/1.0' } });
+        const r = await fetch(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
         if (!r.ok) return [];
         const data = await r.json();
         return (data?.data?.children ?? []).map(c => ({
