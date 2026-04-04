@@ -1,5 +1,5 @@
 ---
-name: reddit-find-posts
+name: astroturf-reddit
 description: >
   Find relevant Reddit posts, leave comments on them, or create new threads/posts.
   Searches Reddit's JSON API across AI-suggested subreddits and returns ranked results.
@@ -22,22 +22,22 @@ Find Reddit posts matching a natural language prompt, leave comments on them, or
 ## Usage
 
 ```
-/reddit-find-posts <natural language prompt>
-/reddit-find-posts <natural language prompt> and comment <what to say>
-/reddit-find-posts <reddit_post_url> <comment or description of what to say>
-/reddit-find-posts post to r/<subreddit> <title and body or description>
-/reddit-find-posts create thread in r/<subreddit> about <topic>
+/astroturf-reddit <natural language prompt>
+/astroturf-reddit <natural language prompt> and comment <what to say>
+/astroturf-reddit <reddit_post_url> <comment or description of what to say>
+/astroturf-reddit post to r/<subreddit> <title and body or description>
+/astroturf-reddit create thread in r/<subreddit> about <topic>
 ```
 
 ### Examples
 
 ```
-/reddit-find-posts find posts where people are talking about how they created a tier list
-/reddit-find-posts people asking for recommendations on ranking tools
-/reddit-find-posts discussions about building in public and early revenue
-/reddit-find-posts https://www.reddit.com/r/tierlists/comments/abc123/title/ Great list!
-/reddit-find-posts post to r/webdev asking what ai website builders people are using
-/reddit-find-posts create thread in r/SideProject about my new ai tool
+/astroturf-reddit find posts where people are talking about how they created a tier list
+/astroturf-reddit people asking for recommendations on ranking tools
+/astroturf-reddit discussions about building in public and early revenue
+/astroturf-reddit https://www.reddit.com/r/tierlists/comments/abc123/title/ Great list!
+/astroturf-reddit post to r/webdev asking what ai website builders people are using
+/astroturf-reddit create thread in r/SideProject about my new ai tool
 ```
 
 ## Detecting Intent
