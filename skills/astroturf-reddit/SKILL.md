@@ -1,11 +1,13 @@
 ---
 name: reddit-find-posts
 description: >
-  Find relevant Reddit posts and optionally leave comments on them. Searches Reddit's
-  JSON API across AI-suggested subreddits and returns ranked results. Can also post
-  comments via Playwright MCP. Triggers on: "reddit find", "find reddit posts",
-  "search reddit", "reddit search", "reddit reply", "reddit comment", "post on reddit",
-  "comment on reddit", or when user provides a Reddit URL with a comment request.
+  Find relevant Reddit posts, leave comments on them, or create new threads/posts.
+  Searches Reddit's JSON API across AI-suggested subreddits and returns ranked results.
+  Can post comments on existing posts or create new threads via Playwright MCP.
+  Triggers on: "reddit find", "find reddit posts", "search reddit", "reddit search",
+  "reddit reply", "reddit comment", "post on reddit", "comment on reddit",
+  "create reddit post", "new reddit thread", "submit to reddit",
+  or when user provides a Reddit URL with a comment request.
 allowed-tools:
   - Bash
   - mcp__playwright__browser_navigate
@@ -13,9 +15,9 @@ allowed-tools:
   - mcp__playwright__browser_snapshot
 ---
 
-# Reddit — Find Posts & Optionally Comment
+# Reddit — Find Posts, Comment, or Create Threads
 
-Find Reddit posts matching a natural language prompt, and optionally leave comments on them.
+Find Reddit posts matching a natural language prompt, leave comments on them, or create new threads in subreddits.
 
 ## Usage
 
@@ -23,6 +25,8 @@ Find Reddit posts matching a natural language prompt, and optionally leave comme
 /reddit-find-posts <natural language prompt>
 /reddit-find-posts <natural language prompt> and comment <what to say>
 /reddit-find-posts <reddit_post_url> <comment or description of what to say>
+/reddit-find-posts post to r/<subreddit> <title and body or description>
+/reddit-find-posts create thread in r/<subreddit> about <topic>
 ```
 
 ### Examples
@@ -32,7 +36,20 @@ Find Reddit posts matching a natural language prompt, and optionally leave comme
 /reddit-find-posts people asking for recommendations on ranking tools
 /reddit-find-posts discussions about building in public and early revenue
 /reddit-find-posts https://www.reddit.com/r/tierlists/comments/abc123/title/ Great list!
+/reddit-find-posts post to r/webdev asking what ai website builders people are using
+/reddit-find-posts create thread in r/SideProject about my new ai tool
 ```
+
+## Detecting Intent
+
+Before executing, determine which action the user wants:
+
+1. **Find posts only** — user says "find", "search", "look for", or just describes a topic with no mention of commenting or posting
+2. **Find posts + comment** — user says "comment", "reply", "leave a comment", or "and say..."
+3. **Comment on a specific URL** — user provides a reddit.com URL with comment text
+4. **Create a new thread** — user says "post to", "create thread", "submit to", "new post in", "make a post", or names a specific subreddit with content to post
+
+If ambiguous, ask the user to clarify whether they want to comment on existing posts or create a new thread.
 
 ## Part 1: Finding Posts
 
@@ -243,6 +260,97 @@ When generating comments (not when the user provides exact text), follow these r
 - "we had the same problem lol. started using datebooq.com for ideas and its been pretty solid honestly"
 - "oh man this is so relatable. check out datebooq.com, they got some good ones on there"
 - "been there. datebooq.com helped us out when we were stuck in the same dinner and movie loop"
+
+## Part 3: Creating New Threads (Optional)
+
+Only create new threads if the user explicitly asks to post/submit/create a thread. Do NOT create threads when the user asks to "comment" or "reply".
+
+### Prerequisites
+
+Same as Part 2: Playwright MCP connected, user logged into Reddit.
+
+### How It Works
+
+Uses Playwright to navigate to the subreddit's submit page and fill in the post form.
+
+### Creating a Thread
+
+1. **Parse the input**: Extract the target subreddit, post title, and body text.
+   - If the user gives a description/instruction (e.g. "post asking about ai tools"), generate an appropriate title and body first and show them to the user for approval before posting.
+   - The same human writing style rules from Part 2 apply to generated thread titles and bodies.
+
+   **CRITICAL: Tailor each thread to the specific subreddit.** When posting to multiple subreddits, NEVER use the same title and body across all of them. Instead:
+   - Read the subreddit's culture and typical post style (e.g. r/startups is founder focused, r/cscareerquestions is career focused, r/Entrepreneur is business focused)
+   - Write a unique title and body that fits naturally in that specific community
+   - Reference the subreddit's typical concerns and language so it reads like a native post
+   - The user's core question should be woven in naturally, adapted to the subreddit's context
+   
+   For example, if the user wants to ask "where to find startup jobs" across subreddits:
+   - r/startups: "whats the best way to find early stage startup roles right now" with body about wanting to join as an early employee and build something
+   - r/cscareerquestions: "anyone here go from big tech to a startup, how did you find the role" with body about career transition and where to look
+   - r/Entrepreneur: "hiring for my startup is tough, where do founders actually post jobs" with body flipped to the founder perspective to get answers from the other side
+
+2. **Create the thread** using this Playwright `browser_run_code` pattern:
+
+```javascript
+async (page) => {
+  const subreddit = '<SUBREDDIT_NAME>';
+  const title = '<POST_TITLE>';
+  const body = '<POST_BODY>';
+
+  // Step 1: Navigate to the subreddit submit page
+  await page.goto(`https://www.reddit.com/r/${subreddit}/submit`);
+  await page.waitForTimeout(3000);
+
+  // Step 2: Make sure we're on the Text tab (not image/link/poll)
+  const textTab = page.locator('button, a').filter({ hasText: /^Text$/ }).first();
+  await textTab.click().catch(() => {});
+  await page.waitForTimeout(500);
+
+  // Step 3: Fill in the title
+  const titleInput = page.locator('#main-content').getByRole('textbox').first();
+  await titleInput.click();
+  await titleInput.fill(title);
+  await page.waitForTimeout(500);
+
+  // Step 4: Fill in the body
+  // The body textbox is typically the second textbox or has a specific placeholder
+  const bodyBox = page.locator('div[role="textbox"][contenteditable="true"]').first();
+  await bodyBox.click();
+  await bodyBox.fill(body);
+  await page.waitForTimeout(500);
+
+  // Step 5: Click the Post/Submit button
+  const postBtn = page.getByRole('button', { name: /^Post$/i }).first();
+  await postBtn.click();
+  await page.waitForTimeout(3000);
+
+  // Step 6: Get the URL of the newly created post
+  const newUrl = page.url();
+
+  return JSON.stringify({ subreddit, title, body, url: newUrl });
+}
+```
+
+3. **If the submit page layout doesn't match** (Reddit changes their UI), fall back to taking a snapshot and adapting selectors. But try the pattern above first.
+
+4. **Handle results**:
+   - If the page URL changed to a `/comments/` URL after clicking Post, the thread was created successfully.
+   - If the user isn't logged in, the submit page will redirect to login. Navigate to `https://www.reddit.com/login/` and ask the user to log in.
+   - If the subreddit requires flair, a modal may appear. Take a snapshot and select the most appropriate flair, or ask the user.
+   - Some subreddits restrict posting (karma requirements, approved submitters only). If posting fails, inform the user.
+
+5. **Show a summary after the thread is created:**
+
+```
+## Thread Created
+
+| Subreddit | Title | URL |
+|-----------|-------|-----|
+| r/webdev | post title here | https://reddit.com/r/webdev/comments/... |
+```
+
+Include the full post body below the table so the user can verify what was posted.
 
 ## Tips
 
