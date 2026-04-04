@@ -38,11 +38,7 @@ Post comments on Reddit posts using the Playwright MCP browser session.
 
 ## How It Works
 
-1. Extract the post ID (`t3_xxxxx`) from the Reddit URL
-2. Navigate to the post page via Playwright to ensure cookies are active
-3. Extract the `token_v2` cookie from the Playwright browser context
-4. Post the comment via Reddit's OAuth API (`https://oauth.reddit.com/api/comment`)
-5. Verify the response (status 200, empty errors array = success)
+Uses the Playwright browser UI to fill in and submit comments directly via Reddit's comment composer. This is more reliable than API-based approaches (OAuth tokens, CSRF tokens, etc. frequently return 403).
 
 ## Implementation
 
@@ -52,48 +48,60 @@ When this skill is invoked:
    - The first argument is the URL (starts with `http`), everything after it is the comment or instruction.
    - If the comment text is an instruction (e.g. "say something sarcastic"), generate an appropriate comment first and show it to the user before posting.
 
-2. **Extract post ID**: Parse the URL to get the post ID in `t3_xxxxx` format.
-   - Pattern: `reddit.com/r/*/comments/<id>/` → `t3_<id>`
+2. **Post the comment** using this exact Playwright `browser_run_code` pattern. This is the proven approach — do NOT deviate or try API-based methods.
 
-3. **Post the comment** using this Playwright browser_run_code pattern.
-
-   **Playwright MCP gotchas:**
-   - Do NOT use `setTimeout` — it's not available in the Playwright MCP sandbox. Use `page.waitForTimeout()` instead.
-   - `page.evaluate()` with `fetch()` works here because we're POSTing to `oauth.reddit.com` (same-origin from the Reddit page). It does NOT work for GETting Reddit's JSON API (returns 403) — use `page.request.get()` for that (see reddit-find-posts skill).
+   **IMPORTANT — What works and what doesn't:**
+   - DO use `browser_run_code` with the exact pattern below. It handles navigation, composer activation, filling, and submission in one call.
+   - Do NOT try Reddit's API endpoints (`/api/comment`, `oauth.reddit.com`). They return 403 due to CSRF/auth issues from the browser context.
+   - Do NOT try to manipulate the DOM directly via `innerHTML` or `dispatchEvent`. Reddit's Lexical editor doesn't pick up those changes.
+   - Do NOT use `page.evaluate()` to find/click the textbox — it resolves but the element is often invisible inside shadow DOM. Use Playwright locators instead.
+   - Do NOT take snapshots to find element refs — it wastes time. The locator selectors below are stable across Reddit posts.
+   - Do NOT use `setTimeout` — use `page.waitForTimeout()` instead.
 
 ```javascript
 async (page) => {
+  // Step 1: Navigate and wait for full page load
   await page.goto('<REDDIT_POST_URL>');
+  await page.waitForTimeout(3000);
+
+  // Step 2: Click the "Join the conversation" textbox to activate the composer
+  // This is a collapsed input that expands into a rich text editor when clicked.
+  // MUST use #main-content scoping to avoid hitting the search textbox.
+  const tb = page.locator('#main-content').getByRole('textbox');
+  await tb.click();
+  await page.waitForTimeout(1000);
+
+  // Step 3: Fill the now-visible composer textbox
+  // After clicking, the composer expands and the textbox gets aria-placeholder.
+  const composer = page.locator('div[role="textbox"][aria-placeholder="Join the conversation"]');
+  await composer.fill('<COMMENT_TEXT>');
+  await page.waitForTimeout(500);
+
+  // Step 4: Click the Comment button to submit
+  await page.getByRole('button', { name: 'Comment', exact: true }).click();
   await page.waitForTimeout(2000);
 
-  const cookies = await page.context().cookies();
-  const token = cookies.find(c => c.name === 'token_v2')?.value;
-
-  if (!token) return 'NOT_LOGGED_IN';
-
-  const comment = "<COMMENT_TEXT>";
-  const body = 'thing_id=<POST_ID>&text=' + encodeURIComponent(comment) + '&api_type=json';
-
-  const resp = await page.evaluate(async ({ token, body }) => {
-    const r = await fetch('https://oauth.reddit.com/api/comment', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body,
-    });
-    return { status: r.status, body: (await r.text()).substring(0, 500) };
-  }, { token, body });
-
-  return JSON.stringify(resp);
+  return 'Comment posted';
 }
 ```
 
+3. **For multiple posts**, repeat the pattern above in separate `browser_run_code` calls (one per post). Each call is self-contained with its own navigation. Do NOT try to batch them into a single call — if one fails it won't affect the others.
+
+   **CRITICAL: Tailor each comment to the specific post.** When commenting on multiple posts, NEVER copy-paste the same comment across all of them. Instead:
+   - Read the post title and body text (available from the search results or the page itself)
+   - Write a unique comment that responds to what that specific post is about
+   - Reference details from the post so it feels like a natural reply to that conversation
+   - The user's core message/question should be woven in naturally, not pasted verbatim
+   
+   For example, if the user wants to ask "Berkeley DS or CMU IS?" across multiple posts:
+   - On a post about CMU vs GT: "im deciding between schools too but different programs, got into CMU for IS and Berkeley for DS. leaning CMU but the berkeley campus is hard to pass up lol. what made you lean toward CMU?"
+   - On a post about Berkeley data science: "also got into berkeley DS! but im torn bc i also got into CMU for information systems. do you think DS at berkeley sets you up well for tech jobs or is it too theoretical?"
+   - On a post about CS career advice: "kind of related, im choosing between berkeley DS and CMU IS right now. im mostly a vibe coder so idk which program fits better for someone who codes but isnt super into theory"
+
 4. **Handle results**:
-   - Status 200 + empty errors = success. Tell the user the comment was posted.
-   - `NOT_LOGGED_IN` = tell user to log into Reddit in the Playwright browser first.
-   - Any errors = report them to the user.
+   - If `browser_run_code` returns without error, the comment was posted successfully.
+   - If the textbox click times out, the user may not be logged in. Navigate to `https://www.reddit.com/login/` and ask them to log in.
+   - If you get rate limited (429 or posting fails), wait 30 seconds before retrying.
 
 ## Writing Style — Sound Human, Not AI
 

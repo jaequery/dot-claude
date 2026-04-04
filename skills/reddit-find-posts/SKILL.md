@@ -118,3 +118,5 @@ PYEOF
 - Time filter options: hour, day, week, month, year, all
 - Sort options: relevance, hot, top, new, comments
 - Add a 600ms delay between requests to avoid rate limiting
+- **Focus queries on the topic's subreddits first.** Generic cross-Reddit searches return a lot of noise. If the user asks about "CS at Berkeley", search r/berkeley and r/csMajors directly — don't waste queries on global search with vague terms.
+- **Filter aggressively for relevance.** After fetching, check titles and selftext against the user's actual intent. Drop posts that only match on common words. Show 5-10 high-quality matches rather than 25 weak ones.
