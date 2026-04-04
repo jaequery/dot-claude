@@ -6,10 +6,7 @@ description: >
   scores, and comment counts. Triggers on: "reddit find", "find reddit posts",
   "search reddit", "reddit search", or when user asks to find discussions on Reddit.
 allowed-tools:
-  - mcp__playwright__browser_run_code
-  - mcp__playwright__browser_navigate
   - Bash
-  - WebFetch
 ---
 
 # Reddit Find Posts — Search Reddit for Relevant Discussions
@@ -38,13 +35,14 @@ When this skill is invoked:
    - 2-3 concise search queries to use with Reddit's search API
    - 5-10 relevant subreddit names to search within
 
-2. **Search Reddit** using the public JSON API (no auth needed). For each subreddit + query combination, fetch results:
+2. **Search Reddit** using `curl` via Bash and the public JSON API (no auth needed).
 
+**Why curl instead of Playwright:** curl is faster, doesn't get rate limited as easily (Playwright shares a browser session that accumulates 429s across searches), and avoids CORS issues entirely. Save Playwright for posting comments only.
+
+For each subreddit + query combination, fetch results:
 ```
 https://www.reddit.com/r/{subreddit}/search.json?q={query}&restrict_sr=1&sort=new&t=week&limit=10
 ```
-
-Use a `User-Agent: RedditSearch/1.0` header. Add a 600ms delay between requests to avoid rate limiting.
 
 If searching across all of Reddit (no specific subreddit):
 ```
@@ -53,53 +51,48 @@ https://www.reddit.com/search.json?q={query}&sort=new&t=week&limit=15
 
 **Default: sort by `new`, time filter `week`.** After fetching, filter results to only include posts from the last 3 days (compare `created_utc` against current time). If the user explicitly asks for older posts, adjust the time filter accordingly (`t=month`, `t=year`, `t=all`).
 
-3. **Use Playwright `browser_run_code`** to execute the searches. Important notes:
-   - Do NOT use `page.evaluate()` with `fetch()` — Reddit returns 403 for in-browser fetches
-   - Use `page.request.get()` instead — this is Playwright's API request context which bypasses CORS/browser restrictions
-   - Do NOT use `setTimeout` — it's not available in the Playwright MCP sandbox. Use `page.waitForTimeout()` instead
+3. **Use a Python script via Bash** to execute all searches, deduplicate, and return results:
 
-```javascript
-async (page) => {
-  const results = [];
-  const subreddits = ['sub1', 'sub2', ...];
-  const queries = ['query1', 'query2'];
+```bash
+python3 << 'PYEOF'
+import json, urllib.request, urllib.parse, time
 
-  async function search(url) {
-    try {
-      const resp = await page.request.get(url, { headers: { 'User-Agent': 'RedditSearch/1.0' } });
-      if (resp.ok()) {
-        const data = await resp.json();
-        for (const c of (data?.data?.children ?? [])) {
-          results.push({
-            subreddit: c.data.subreddit, title: c.data.title, score: c.data.score,
-            num_comments: c.data.num_comments, permalink: 'https://reddit.com' + c.data.permalink,
-            selftext: (c.data.selftext || '').slice(0, 200), created_utc: c.data.created_utc, author: c.data.author,
-          });
-        }
-      }
-    } catch(e) {}
-  }
+results = []
+queries = ["query1", "query2", "query3"]
+subreddits = ["sub1", "sub2", "sub3"]
 
-  for (const query of queries) {
-    // Search across all of Reddit first (sort=new, t=week)
-    await search(`https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=new&t=week&limit=15`);
-    await page.waitForTimeout(600);
+def fetch(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "RedditSearch/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            for c in data.get("data",{}).get("children",[]):
+                d = c["data"]
+                results.append({"subreddit": d["subreddit"], "title": d["title"], "score": d["score"],
+                    "num_comments": d["num_comments"], "permalink": "https://reddit.com" + d["permalink"],
+                    "selftext": d.get("selftext","")[:200], "created_utc": d["created_utc"], "author": d["author"]})
+    except: pass
 
-    // Then search specific subreddits
-    for (const sub of subreddits) {
-      await search(`https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=new&t=week&limit=10`);
-      await page.waitForTimeout(600);
-    }
-  }
+for q in queries:
+    fetch(f"https://www.reddit.com/search.json?q={urllib.parse.quote(q)}&sort=new&t=week&limit=15")
+    time.sleep(0.6)
+    for sub in subreddits:
+        fetch(f"https://www.reddit.com/r/{sub}/search.json?q={urllib.parse.quote(q)}&restrict_sr=1&sort=new&t=week&limit=10")
+        time.sleep(0.6)
 
-  // Filter to last 3 days, deduplicate, sort newest first
-  const threeDaysAgo = (Date.now() / 1000) - (3 * 24 * 60 * 60);
-  const recent = results.filter(p => p.created_utc >= threeDaysAgo);
-  const seen = new Set();
-  const unique = recent.filter(p => { if (seen.has(p.permalink)) return false; seen.add(p.permalink); return true; });
-  unique.sort((a, b) => b.created_utc - a.created_utc);
-  return JSON.stringify(unique.slice(0, 25));
-}
+# Filter to last 3 days, deduplicate, sort newest first
+import time as t
+three_days_ago = t.time() - (3 * 24 * 60 * 60)
+recent = [p for p in results if p["created_utc"] >= three_days_ago]
+seen = set()
+unique = []
+for p in recent:
+    if p["permalink"] not in seen:
+        seen.add(p["permalink"])
+        unique.append(p)
+unique.sort(key=lambda x: x["created_utc"], reverse=True)
+print(json.dumps(unique[:25], indent=2))
+PYEOF
 ```
 
 4. **Present results** in a clean format:
@@ -124,3 +117,4 @@ async (page) => {
 - Reddit's search API is limited — if results are poor, try different query terms
 - Time filter options: hour, day, week, month, year, all
 - Sort options: relevance, hot, top, new, comments
+- Add a 600ms delay between requests to avoid rate limiting
