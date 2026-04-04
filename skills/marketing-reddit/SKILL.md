@@ -345,12 +345,10 @@ async (page) => {
 ```
 ## Thread Created
 
-| Subreddit | Title | URL |
-|-----------|-------|-----|
-| r/webdev | post title here | https://reddit.com/r/webdev/comments/... |
+| Subreddit | Title | Post Body/Message | URL |
+|-----------|-------|-------------------|-----|
+| r/webdev | post title here | the full post body text | https://reddit.com/r/webdev/comments/... |
 ```
-
-Include the full post body below the table so the user can verify what was posted.
 
 ## Tips
 
