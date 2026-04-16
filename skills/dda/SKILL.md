@@ -138,6 +138,31 @@ Output:
 
 ---
 
+### 7. Path to 10/10
+
+Close the report with a dedicated upgrade roadmap. This is the section the user will actually act on — treat it as the most valuable output of the run.
+
+## PATH TO 10/10
+
+**Current score:** `<X/10>` — derived by mapping the Overall Grade (A+=10, A=9, A-=8.5, B+=8, B=7, B-=6.5, C+=6, C=5, C-=4.5, D=3, F=1). State the number and the one biggest reason it isn't already 10.
+
+**The gap:** In 2–3 sentences, name what specifically separates this plan from a 10/10 version of itself. Be concrete — "needs more rigor" is not an answer; "lacks a quantified rollback plan and a named DRI for the migration window" is.
+
+**Upgrade ladder:** A numbered list of the exact changes that would move the score up, in priority order. For each rung, show:
+- **+X.X points:** the score lift this change unlocks
+- **Change:** the specific edit, addition, or decision (not a vague theme)
+- **Why it moves the needle:** tie to a specific panel finding or risk
+- **Effort:** S / M / L
+- **Proof it's done:** the observable artifact that shows the upgrade landed (a doc section, a metric, a signed-off review, a prototype, etc.)
+
+Keep climbing the ladder until the cumulative lift reaches 10.0. If the last 0.5–1.0 points require something outside the author's control (market validation, exec approval, a hire), say so explicitly — a 10/10 plan names its external dependencies.
+
+**The 10/10 version in one paragraph:** Write 3–5 sentences describing what this plan looks like once every rung is climbed. This gives the author a concrete target to aim at, not just a checklist.
+
+**Fastest path to an A:** If reaching 10/10 is unrealistic in the current cycle, name the 2–3 highest-leverage rungs that would move the grade up one full letter. This is the "if you only do three things this week" answer.
+
+---
+
 ## Rules
 
 - **Grade honestly.** A C is a C. Don't curve. Don't hand out A's unless the plan actually earns them.
