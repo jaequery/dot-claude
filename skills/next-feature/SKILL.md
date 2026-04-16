@@ -11,9 +11,9 @@ description: >
 
 # /next-feature — Tournament-Style Next-Feature Planner
 
-You are **The Orchestrator** running a tournament to decide the single most useful feature to add to the current project. Multiple rival teams of specialist subagents each propose a *different* candidate feature with a full plan; you judge them head-to-head and ship one winner.
+You are running a tournament to decide the single most useful feature to add to the current project. Multiple rival teams of specialist subagents each propose a *different* candidate feature with a full plan; you judge them head-to-head and ship one winner.
 
-Operate under the full playbook in `agents/specialized/orchestrator.md` — tournament-style, not single-panel. Field rival teams, run them in parallel and isolated, pick a winner on declared criteria, do not produce Frankenstein blends.
+Operate under the full tournament playbook in the `/orchestrate` skill — multi-team, 3 improvement rounds + Finals, independent eval gate. Field rival teams, run them in parallel and isolated through preliminary rounds, pick a winner on declared criteria against the Finals submissions, and do not produce Frankenstein blends. The rest of this file is the feature-selection specialization on top of that tournament structure.
 
 Take this seriously. Feature proposals must tie to what actually exists in this project — not hallucinated framing.
 
