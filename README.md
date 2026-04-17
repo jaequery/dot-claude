@@ -59,6 +59,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** Each team runs in isolation (no rival visibility) for the improvement rounds. Finals reveal sanitized rival summaries and loosen constraints. An independent eval panel — declared up front — runs the winner against acceptance criteria. Patch-and-retry capped at 2, extra-round at 1, re-field at 1; after that it escalates to you rather than shipping a "Frankenstein winner."
 
+**Example.**
+
+```
+/orchestrate design the pricing page for a dev tool that serves hobbyists and enterprise buyers
+```
+
+*Two audiences with opposite needs — rival teams explore different pricing archetypes (freemium / tiered / hybrid), iterate over three rounds, and the winner ships only after passing a conversion-proxy eval gate.*
+
 ---
 
 ### `/next-feature`
@@ -72,6 +80,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Tournament bracket → each team's feature submission → weighted scoring table → one winner with a 9-point plan (name, description, strategic case, user story, scope, effort, risks, success metric, implementation sketch) → runner-up salvage → next actions.
 
 **How it works.** Auto-scans `README`, `CLAUDE.md`, manifest, `git log`, `git shortlog`, and roadmap files. Fields 2–4 strategy-lensed teams (e.g. "User Value", "Growth", "Foundation", "Quick Win"). Inherits the full `/orchestrate` playbook including the independent eval gate — and refuses to ship a weak winner (reruns once or escalates).
+
+**Example.**
+
+```
+/next-feature
+```
+
+*Run inside a year-old side project — the tournament fields "Retention", "Growth", and "Foundation" teams, then ships a single 9-point plan for the winner: "Weekly progress email with one-click streak recovery."*
 
 ---
 
@@ -87,6 +103,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** Orchestrator picks domain-fit subagents and *always* includes an adversarial voice (Reality Checker, Evidence Collector, Code Reviewer, etc.) to prevent groupthink. Panel dispatches in parallel with a capped 400-word output contract; grades averaged on an A=4.0 scale.
 
+**Example.**
+
+```
+/dda review this Q2 GTM plan: <paste plan>
+```
+
+*Panel assembles a GTM strategist, a CFO-style skeptic, a sales engineer, and Reality Checker. Master Brain returns a **YELLOW** verdict with three kill criteria and a Path-to-10 upgrade ladder.*
+
 ---
 
 ### `/code-review`
@@ -100,6 +124,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Quick Summary + verdict (APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES / BLOCK) → Dimension Coverage table → Findings with `path:line` evidence and severity → Expert-Review-Recommended table → Not-Reviewed list → cost footer.
 
 **How it works.** Runs 77 grep-level checks, executes the project's own test / lint / typecheck commands (classifying infra-SKIP vs genuine-FAIL), caps nits at 10, and refuses to cite a finding without `path:line` evidence.
+
+**Example.**
+
+```
+/code-review 247
+```
+
+*Resolves PR #247 via `gh pr`, runs the repo's own test + lint + typecheck, and returns a **REQUEST-CHANGES** verdict citing a SQL injection at `api/search.ts:84` and a missing index flagged as `[needs-verification]`.*
 
 ---
 
@@ -115,6 +147,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** Auto-scans `README`, manifest files, `git log -20`, `git shortlog`, top-level dirs, and the landing page/entry point. Plays all roles (narrator + founder + three distinct Shark personas). All claims must be grounded in observed code / docs / git history.
 
+**Example.**
+
+```
+/shark-tank
+```
+
+*Scans the repo, pitches a side-project-to-SaaS story, Mr. Wonderful tears into the missing revenue model, Cuban sees scale potential, Greiner offers $50K for 20% — ends with The Deal and a 38/70 scorecard.*
+
 ---
 
 ### `/git-audit`
@@ -128,6 +168,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Sectioned report covering churn hotspots, bus factor, bug clusters, velocity, stale files, and more → summary dashboard table (OK / WARN / CONCERN) → 3–5 prioritized recommendations.
 
 **How it works.** Runs 13 specific `git log` / `shortlog` / `for-each-ref` analyses in parallel and applies fixed thresholds (e.g. bus factor CONCERN if top contributor >60%, test ratio CONCERN if <10%).
+
+**Example.**
+
+```
+/git-audit
+```
+
+*Surfaces that one dev owns 72% of `src/billing/*` (CONCERN), test ratio dropped to 6% last quarter (CONCERN), three files haven't been touched in 14 months, and Friday-night deploys correlate with bug fix commits.*
 
 ---
 
@@ -143,6 +191,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** PG YC-review framing. Refuses generic advice — every flaw must be specific to *this* idea. Verdict is direct: never "it has potential but."
 
+**Example.**
+
+```
+/startup-pressure-test-idea an AI SOAP-note generator for solo therapists — $79/mo subscription
+```
+
+*Returns three fatal flaws specific to this idea (HIPAA BAA costs, insurance-coded note formats, therapist trust in AI for mental health) and a **WEAK** verdict with a $0 validation step.*
+
 ---
 
 ### `/startup-validate-problem`
@@ -156,6 +212,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Specific Pain (trigger moment, frequency, cost, "in their words") → Early Adopter Profile (a specific person, where to find 10 this week, what they've tried) → 5 Mom-Test discovery questions + what each reveals + banned questions → Validation Criteria (green lights, red flags, minimum bar) → **Verdict**: Painkiller / Vitamin / Placebo + current-workaround test.
 
 **How it works.** Applies *The Mom Test* — no pitching, no hypotheticals, no leading questions. Enforces daily/weekly problems only, early adopter must be a specific person (not a segment), and the user's words must sound like a human, not a pitch deck.
+
+**Example.**
+
+```
+/startup-validate-problem idea: AI SOAP notes; customer: solo therapists in private practice
+```
+
+*Outputs 5 Mom-Test discovery questions, where to find 10 therapists this week, and a **Painkiller** verdict because every therapist currently burns 30 min after each session writing by hand.*
 
 ---
 
@@ -171,6 +235,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** PG "what are people doing now" framing. Enforces: *"we have no competition"* = always wrong; *"we have AI"* = not differentiation in 2026. Rates each competitor on awareness + switching cost + satisfaction.
 
+**Example.**
+
+```
+/startup-map-competition idea: AI SOAP notes; customer: solo therapists
+```
+
+*Surfaces Upheal and Mentalyc as direct competitors, SimplePractice's built-in notes as indirect, and "therapists writing by hand during sessions" as The Real Enemy — verdict: **Emerging, narrow opening around insurance-coded formats.***
+
 ---
 
 ### `/startup-build-mvp`
@@ -184,6 +256,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Core Assumption (falsifiable) → Minimum Feature Set table (3–5 features max) → What Gets Cut table → behavioral Test Criteria (validated / invalidated thresholds + non-valid signals + sample size) → Week 1 Build / Week 2 Launch day-by-day plan → post-test branching (validated / invalidated / ambiguous).
 
 **How it works.** PG "build something people want" framing. Enforces: MVP tests *one* assumption — never two; every non-test feature gets cut; test criteria must be behavioral, not opinion; launch week must end with real users generating signal.
+
+**Example.**
+
+```
+/startup-build-mvp idea: AI SOAP notes; assumption: therapists will paste a session transcript and trust the output enough to ship it to their EHR
+```
+
+*Cuts scope to 3 features (transcript upload, SOAP generator, copy-to-clipboard), sets "70% of users ship without edits" as the validated threshold, and plans a day-by-day 2-week launch.*
 
 ---
 
@@ -199,6 +279,14 @@ A sequenced, zero-to-one operating system:
 
 **How it works.** Rules enforce specificity ("Reddit" isn't; "r/SaaS" is), manual-only (no ads, no automation), and asking for a conversation — never a sale. Templates come with `[bracket]` personalization points.
 
+**Example.**
+
+```
+/startup-find-customers idea: AI SOAP notes; customer: solo therapists in private practice
+```
+
+*Channel table points to r/therapists, Psychology Today directory scraping, and ADAA conferences. Hands back a 72-word first-message template and a 4-week milestone plan: Research → First Conversations → First Users → PMF Signal.*
+
 ---
 
 ### `/startup-growth-strategy`
@@ -212,6 +300,14 @@ A sequenced, zero-to-one operating system:
 **What you get.** Natural Growth Loop (type, speed, strength %) → Top 3 Acquisition Channels (with CAC, time-to-results, 1-week test) → Referral Mechanism (built-in, not bolted on) → 90-day week-by-week plan (Foundation / Amplify / Compound) → The Single Metric (leading, not lagging) + "if you stopped marketing today" test.
 
 **How it works.** PG "make something people want and tell their friends" framing. Enforces: retention <40% weekly → fix retention first; content marketing / SEO aren't strategies; a referral program is a bribe, not a referral.
+
+**Example.**
+
+```
+/startup-growth-strategy idea: AI SOAP notes; users: 47; target: solo therapists
+```
+
+*Identifies a "your therapist colleague asks what tool you use" word-of-mouth loop, picks r/therapists + Psychology Today + conference sponsorships as the top 3 channels, and lays out a 90-day week-by-week plan to 1,000 users.*
 
 ---
 
@@ -235,6 +331,14 @@ Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"tec
 
 **How it works.** Orchestrates 12 sub-skills + 6 subagents (`seo-technical`, `seo-content`, `seo-schema`, `seo-sitemap`, `seo-performance`, `seo-visual`) in parallel. Enforces quality gates (hard stop at 50+ location pages, ban on HowTo schema post-deprecation, use INP not FID). Reference files load on-demand.
 
+**Example.**
+
+```
+/seo audit https://acme.com
+```
+
+*Full audit returns a **62/100** SEO Health Score, industry detected as SaaS, three Critical issues (missing hreflang, INP > 500ms on pricing, duplicate H1s), plus a prioritized 14-item action plan.*
+
 ---
 
 ### `/market-research`
@@ -248,6 +352,14 @@ Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"tec
 **What you get.** Raw + scored JSON files dated in the skill directory → top-50 console dump → a final markdown report with Top 10 opportunities table, per-keyword content strategy, quick wins, cluster strategy, seasonality notes, and priority ranking.
 
 **How it works.** Runs `node keyword-research.js` which scrapes Google Autocomplete (with a–z expansion), YouTube Autocomplete, Google Related Searches HTML, Reddit post titles, and Google Trends. Cross-source count is the core demand signal.
+
+**Example.**
+
+```
+market research --only "home espresso machine, pour over coffee setup"
+```
+
+*Scrapes all five sources and returns a Top 10 opportunities table — "jura espresso machine settings" scores **9.2** (high demand + low competition) with a recommended article cluster and seasonality note.*
 
 ---
 
@@ -263,6 +375,14 @@ Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"tec
 
 **How it works.** Uses `curl` / `urllib` against Reddit's public JSON search API (last-3-days filter) for search, then **Playwright MCP** (`browser_run_code` with stable locators on the Lexical composer) for comments and threads. Enforces strict human style: no em dashes, no sycophancy, no all-lowercase-AI voice.
 
+**Example.**
+
+```
+find reddit posts about notion alternatives in the last 3 days and draft comments
+```
+
+*Returns 12 ranked posts across r/Notion, r/productivity, and r/selfhosted, then drafts a human-voice 2-sentence comment for each — no dashes, no "great question," no AI tells.*
+
 ---
 
 ### `/cmux-diff`
@@ -277,6 +397,14 @@ Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"tec
 
 **How it works.** Bash-only skill. Ensures `~/Scripts/cmux-diff` has `bun` deps installed, spawns `bun run src/cli.ts --dry-run` in the background, scrapes the port from the log, and calls `cmux browser open`.
 
+**Example.**
+
+```
+/cmux-diff
+```
+
+*Spawns the local server, scrapes port 48291 from the log, and opens the sidebar changes panel in the cmux browser — ready to click through files without leaving the terminal.*
+
 ---
 
 ### `/worktree-task`
@@ -290,6 +418,14 @@ Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"tec
 **What you get.** A new worktree + branch (`wt/<slug>-<ts>`) at a sibling path, the task executed there, then a 5-option cleanup menu: (a) keep, (b) merge, (c) rebase + push + PR, (d) discard, (e) stash and keep, (f) adopt branch into main tree.
 
 **How it works.** Thin auditable wrapper around `git worktree add`. Uses `cd "$WT_PATH" && …` per call since cwd doesn't persist. Enforces typed-`yes` gates on destructive ops, `--force-with-lease` on push, and merge-base safety checks before `-d` / `-D`. Preflight aborts on submodule / detached-HEAD / path-collision without explicit user direction.
+
+**Example.**
+
+```
+/worktree-task refactor the auth middleware to use jose instead of jsonwebtoken
+```
+
+*Creates `../repo-wt/refactor-auth-20260416/` on branch `wt/refactor-auth-20260416`, runs the refactor inside it without touching your in-flight changes in the main checkout, then offers the 5-option cleanup menu — pick (c) to push and open a PR.*
 
 ---
 
