@@ -1,0 +1,14 @@
+{
+  "name": "jaequery",
+  "owner": {
+    "name": "Jae Lee",
+    "url": "https://github.com/jaequery"
+  },
+  "plugins": [
+    {
+      "name": "jaequery",
+      "source": "./plugins/jaequery",
+      "description": "Jae Lee's full arsenal — 17 skills + 167 specialist subagents bundled into one install."
+    }
+  ]
+}

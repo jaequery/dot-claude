@@ -1,0 +1,9 @@
+{
+  "name": "jaequery",
+  "version": "1.0.0",
+  "description": "Jae Lee's full arsenal: 17 skills (startup planning, code review, multi-agent orchestration, SEO, Reddit marketing, cmux-diff) plus 167 specialist subagents across engineering, design, product, growth, game-dev, and specialized domains.",
+  "author": {
+    "name": "Jae Lee",
+    "url": "https://github.com/jaequery"
+  }
+}

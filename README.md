@@ -1,6 +1,21 @@
 # dot-claude
 
-My personal Claude Code arsenal — custom slash-command skills and a curated roster of 140+ specialist subagents. Built to turn Claude from a clever assistant into an opinionated team of domain experts.
+My personal Claude Code arsenal — custom slash-command skills and a curated roster of 140+ specialist subagents, published as a single **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated team of domain experts.
+
+## Install
+
+This repo is a Claude Code plugin marketplace. Inside Claude Code, run:
+
+```
+/plugin marketplace add jaequery/dot-claude
+/plugin install jaequery@jaequery
+```
+
+That's it. All 17 skills and 167 subagents are now available. Skills invoke as `/jaequery:<skill-name>` (e.g. `/jaequery:shark-tank`, `/jaequery:orchestrate`). Subagents are available to the Task tool under their original `subagent_type` names.
+
+To update later: `/plugin marketplace update jaequery`.
+
+---
 
 ## Why this exists
 
