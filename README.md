@@ -8,38 +8,288 @@ Out-of-the-box Claude is a generalist. Real work needs specialists — someone w
 
 ---
 
-## Custom Skills (slash commands)
+## Custom Skills — quick index
 
-Invoke any of these from the Claude Code prompt. Each one is a self-contained SOP — no setup required.
+Invoke any of these from the Claude Code prompt. Each one is a self-contained SOP — no setup required. See [Skill Guides](#skill-guides) below for the deep dive on each.
 
-### Analysis & decision-making
+### Decision & review
 
-- **`/dda` — Deep Dive Analysis.** Takes any plan, auto-assembles a 3–6 agent expert panel from the roster, grades it A–F across six metrics, then a "Master Brain" synthesis layer delivers a GREEN/YELLOW/RED verdict with kill criteria. The review you'd get from a good advisory board, in one command.
-- **`/shark-tank` — Project evaluation as Shark Tank.** Analyzes the current repo and stages a full episode — pitch, Shark reactions, scorecard, verdict. Brutally honest and entertaining.
-- **`/git-audit` — Repo health audit.** Runs 13 git analyses covering churn hotspots, bus factor, bug clusters, velocity, stale files, and team dynamics. Surfaces what `git log` won't tell you at a glance.
+- [`/orchestrate`](#orchestrate) — Tournament of rival teams with an independent eval gate.
+- [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
+- [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel grades a plan A–F, Master Brain issues a verdict.
+- [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
+- [`/shark-tank`](#shark-tank) — Evaluate the current project as a Shark Tank episode.
+- [`/git-audit`](#git-audit) — 13-way repo health and team-dynamics audit.
 
 ### Startup playbooks (Paul Graham framework)
 
-Six skills that compose into a full zero-to-one operating system:
+A sequenced, zero-to-one operating system:
 
-- **`/startup-pressure-test-idea`** — Finds every fatal flaw YC-style before you waste a week building.
-- **`/startup-validate-problem`** — "Talk to users" framework: is this a real problem people pay for?
-- **`/startup-build-mvp`** — Smallest MVP that tests the core assumption in two weeks.
-- **`/startup-find-customers`** — Manual plan for the first 10 customers; "do things that don't scale."
-- **`/startup-map-competition`** — Maps every real competitor, including the invisible ones most founders miss.
-- **`/startup-growth-strategy`** — "Make something people want and tell their friends," wired into a compounding engine.
-
-Why they're good: each one is scoped to a single decision, refuses to hand out participation trophies, and ends with a concrete next action — not a strategy deck.
+1. [`/startup-pressure-test-idea`](#startup-pressure-test-idea)
+2. [`/startup-validate-problem`](#startup-validate-problem)
+3. [`/startup-map-competition`](#startup-map-competition)
+4. [`/startup-build-mvp`](#startup-build-mvp)
+5. [`/startup-find-customers`](#startup-find-customers)
+6. [`/startup-growth-strategy`](#startup-growth-strategy)
 
 ### Marketing & growth
 
-- **`/seo`** — Full SEO suite: site audits, single-page deep dives, technical checks (crawlability, Core Web Vitals, INP), schema validation/generation, content quality scoring.
-- **`/market-research`** — Scrapes Google Autocomplete, Reddit, YouTube, and Google Trends for a topic. Outputs a ranked keyword report with demand scores and content ideas grounded in real signals.
-- **`/marketing-reddit`** — Finds relevant Reddit posts across AI-suggested subreddits, ranks them, and can comment or post via Playwright MCP. Built for authentic engagement, not spam.
+- [`/seo`](#seo) — Full SEO suite (audit, page, schema, GEO, plan).
+- [`/market-research`](#market-research) — Keyword opportunities from real demand signals.
+- [`/marketing-reddit`](#marketing-reddit) — Find Reddit posts, leave comments, create threads.
 
 ### Utilities
 
-- **`/cmux-diff`** — VSCode-style changes panel in a sidebar layout for reviewing diffs without leaving the terminal.
+- [`/cmux-diff`](#cmux-diff) — Sidebar diff viewer for the current repo.
+- [`/worktree-task`](#worktree-task) — Run a task in an isolated git worktree.
+
+---
+
+## Skill Guides
+
+### `/orchestrate`
+
+**What it does.** Runs a tournament-style multi-team decision or build: 2–4 rival teams of specialists each produce a complete attempt, iterate for 3 rounds on private critiques, go all-out in a Finals round, and one winner passes an independent eval gate before shipping.
+
+**When to use.** When the *approach itself* is an open question, the task benefits from best-of-N rather than a single opinion, or the stakes justify 4–6× dispatch cost. Not for routine tasks.
+
+**How to invoke.** `/orchestrate <task>` or phrases like *"run a tournament"*, *"field competing teams"*, *"best-of-N"*, *"multi-team showdown"*. One clarifying question allowed; everything else (bracket size, team diversity, acceptance bar, eval method) is decided by the orchestrator.
+
+**What you get.** Bracket announcement → Round 1/2/3 submissions → Finals → weighted judging table → eval-gate PASS/FAIL report with evidence → final winner (with each team's trajectory) → runner-up salvage notes → next actions and known limits.
+
+**How it works.** Each team runs in isolation (no rival visibility) for the improvement rounds. Finals reveal sanitized rival summaries and loosen constraints. An independent eval panel — declared up front — runs the winner against acceptance criteria. Patch-and-retry capped at 2, extra-round at 1, re-field at 1; after that it escalates to you rather than shipping a "Frankenstein winner."
+
+---
+
+### `/next-feature`
+
+**What it does.** Plans the single most useful next feature for the current project by running an `/orchestrate` tournament of rival feature proposals.
+
+**When to use.** When you want a grounded, judged decision on *what to ship next* — not a brainstorm list or a feature parade.
+
+**How to invoke.** `/next-feature` from inside the project, or *"what should I build next"*, *"pick my next feature"*, *"plan the next feature"*. One clarifying question max about goal/audience.
+
+**What you get.** Tournament bracket → each team's feature submission → weighted scoring table → one winner with a 9-point plan (name, description, strategic case, user story, scope, effort, risks, success metric, implementation sketch) → runner-up salvage → next actions.
+
+**How it works.** Auto-scans `README`, `CLAUDE.md`, manifest, `git log`, `git shortlog`, and roadmap files. Fields 2–4 strategy-lensed teams (e.g. "User Value", "Growth", "Foundation", "Quick Win"). Inherits the full `/orchestrate` playbook including the independent eval gate — and refuses to ship a weak winner (reruns once or escalates).
+
+---
+
+### `/dda` — Deep Dive Analysis
+
+**What it does.** Auto-assembles a 3–6 agent expert panel from the roster, grades your plan A–F across six metrics, then a "Master Brain" synthesis layer issues a GREEN / YELLOW / RED verdict with kill criteria.
+
+**When to use.** You have a plan, spec, strategy, or pitch and want advisory-board-quality review in one command.
+
+**How to invoke.** `/dda <plan>`, or paste a plan / pass a file path / point at prior discussion, then trigger with *"deep dive analysis"*, *"deep dive this plan"*, *"multi-agent expert review"*. One clarifying question allowed if ambiguous.
+
+**What you get.** Panel roster → grade matrix (6 metrics × agents) → consensus strengths, risks, questions, recommended changes → **Master Brain Verdict** (GREEN / YELLOW / RED) → **Path to 10/10** upgrade ladder with scored rungs.
+
+**How it works.** Orchestrator picks domain-fit subagents and *always* includes an adversarial voice (Reality Checker, Evidence Collector, Code Reviewer, etc.) to prevent groupthink. Panel dispatches in parallel with a capped 400-word output contract; grades averaged on an A=4.0 scale.
+
+---
+
+### `/code-review`
+
+**What it does.** Surgical, evidence-gated code review across five dimensions — **Simple, Performant, Clean, Secure, Testable** — with a hard evidence gate that auto-downgrades speculation to `[needs-verification]`.
+
+**When to use.** You want a rigorous, grounded review of a diff, PR, file, branch, or pasted snippet — one that distinguishes real findings from hand-waving.
+
+**How to invoke.** `/code-review [target]`, or *"review this code"*, *"review my PR"*, *"audit these changes"*, *"security review"*, *"performance review"*, or simply paste a diff. Target auto-resolves via `gh pr`, staged diff, branch-vs-main, `git status`, or `HEAD`.
+
+**What you get.** Quick Summary + verdict (APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES / BLOCK) → Dimension Coverage table → Findings with `path:line` evidence and severity → Expert-Review-Recommended table → Not-Reviewed list → cost footer.
+
+**How it works.** Runs 77 grep-level checks, executes the project's own test / lint / typecheck commands (classifying infra-SKIP vs genuine-FAIL), caps nits at 10, and refuses to cite a finding without `path:line` evidence.
+
+---
+
+### `/shark-tank`
+
+**What it does.** Evaluates the current project as a dramatic Shark Tank episode — pitch, Shark reactions, scorecard, verdict.
+
+**When to use.** You want an entertaining-but-honest investor-framed evaluation of your project across problem, product, tech, traction, business model, moat, and team signal. No curve grading.
+
+**How to invoke.** `/shark-tank`, or *"rate this project"*, *"would you invest"*, *"shark tank"*.
+
+**What you get.** A full scripted episode — narrator intro → in-character founder pitch → Shark dialogue → scorecard (7 categories × /10, total /70) → The Good / Concerns / Hard Questions → per-Shark IN/OUT verdicts and The Deal.
+
+**How it works.** Auto-scans `README`, manifest files, `git log -20`, `git shortlog`, top-level dirs, and the landing page/entry point. Plays all roles (narrator + founder + three distinct Shark personas). All claims must be grounded in observed code / docs / git history.
+
+---
+
+### `/git-audit`
+
+**What it does.** Dashboard-style health and team-dynamics audit of a git repository — the things `git log` won't tell you at a glance.
+
+**When to use.** You want a high-level signal read on repo risk, ownership, bug clusters, velocity, and test discipline.
+
+**How to invoke.** `/git-audit [path]`, or *"audit this repo"*, *"repo health"*, *"codebase audit"*, *"git analysis"*. Defaults to cwd.
+
+**What you get.** Sectioned report covering churn hotspots, bus factor, bug clusters, velocity, stale files, and more → summary dashboard table (OK / WARN / CONCERN) → 3–5 prioritized recommendations.
+
+**How it works.** Runs 13 specific `git log` / `shortlog` / `for-each-ref` analyses in parallel and applies fixed thresholds (e.g. bus factor CONCERN if top contributor >60%, test ratio CONCERN if <10%).
+
+---
+
+### `/startup-pressure-test-idea`
+
+**What it does.** YC-application-style brutal evaluation of a startup idea — finds every fatal flaw before you waste a week building.
+
+**When to use.** Very early stage — you have an idea and want honest red-team analysis before investing time.
+
+**How to invoke.** `/startup-pressure-test-idea`, or *"pressure test my idea"*, *"evaluate my startup idea"*, *"is this a good startup idea"*. Asks for the idea (what / who / how it makes money) if not supplied.
+
+**What you get.** Core Assumption (falsifiable) + a $0, <1-week validation step → three mechanism-specific Fatal Flaws ranked by severity → Problem Validation (Painkiller / Vitamin / Placebo + current workaround + willingness to pay) → Founder-Market Fit read → **Brutal Verdict** (STRONG / WEAK / PIVOT REQUIRED) + "if I had to bet" one-liner.
+
+**How it works.** PG YC-review framing. Refuses generic advice — every flaw must be specific to *this* idea. Verdict is direct: never "it has potential but."
+
+---
+
+### `/startup-validate-problem`
+
+**What it does.** Validates whether the problem is real and paid-for using Paul Graham's "talk to users" framework.
+
+**When to use.** After the idea exists, before building — you need a customer-discovery plan and a verdict on problem realness.
+
+**How to invoke.** `/startup-validate-problem`, or *"validate my problem"*, *"is this a real problem"*, *"customer discovery"*. Asks for idea + target customer if missing.
+
+**What you get.** Specific Pain (trigger moment, frequency, cost, "in their words") → Early Adopter Profile (a specific person, where to find 10 this week, what they've tried) → 5 Mom-Test discovery questions + what each reveals + banned questions → Validation Criteria (green lights, red flags, minimum bar) → **Verdict**: Painkiller / Vitamin / Placebo + current-workaround test.
+
+**How it works.** Applies *The Mom Test* — no pitching, no hypotheticals, no leading questions. Enforces daily/weekly problems only, early adopter must be a specific person (not a segment), and the user's words must sound like a human, not a pitch deck.
+
+---
+
+### `/startup-map-competition`
+
+**What it does.** Maps every real competitor — including the invisible ones most founders miss, especially current behavior / inertia.
+
+**When to use.** You need a comprehensive competitive picture, especially to surface the status-quo behavior that is the real competitor.
+
+**How to invoke.** `/startup-map-competition`, or *"map my competition"*, *"competitive analysis"*, *"who are my competitors"*. Asks for idea + target customer if missing.
+
+**What you get.** Current Behavior breakdown (competitor #1) → Direct Competitors table (strength / weakness / awareness / switching cost) → Indirect Competitors table → The Real Enemy (the specific habit / inertia to defeat) → Genuine Differentiation reality-check → competitive verdict (Empty / Emerging / Crowded / Graveyard) + opening.
+
+**How it works.** PG "what are people doing now" framing. Enforces: *"we have no competition"* = always wrong; *"we have AI"* = not differentiation in 2026. Rates each competitor on awareness + switching cost + satisfaction.
+
+---
+
+### `/startup-build-mvp`
+
+**What it does.** Designs the smallest MVP that tests one falsifiable core assumption in two weeks.
+
+**When to use.** You have an idea and need a ruthless cut-down MVP scoped to testing a single assumption with real users.
+
+**How to invoke.** `/startup-build-mvp`, or *"design my mvp"*, *"what should I build first"*, *"minimum viable product"*. Asks for idea + core assumption if either is missing.
+
+**What you get.** Core Assumption (falsifiable) → Minimum Feature Set table (3–5 features max) → What Gets Cut table → behavioral Test Criteria (validated / invalidated thresholds + non-valid signals + sample size) → Week 1 Build / Week 2 Launch day-by-day plan → post-test branching (validated / invalidated / ambiguous).
+
+**How it works.** PG "build something people want" framing. Enforces: MVP tests *one* assumption — never two; every non-test feature gets cut; test criteria must be behavioral, not opinion; launch week must end with real users generating signal.
+
+---
+
+### `/startup-find-customers`
+
+**What it does.** Builds a manual plan to acquire the first 10 real customers using "do things that don't scale."
+
+**When to use.** You need a non-automated, channel-specific plan to locate, message, and convert your first 10 users.
+
+**How to invoke.** `/startup-find-customers`, or *"find my first customers"*, *"first 10 users"*, *"early traction plan"*. Asks for idea + target customer if missing.
+
+**What you get.** Table of exact channels / locations with estimates → per-channel manual outreach approach → actual first-message templates (<100 words) → Devastation Test success criteria + politeness-signal red flags → 4-week milestone plan (Research → First Conversations → First Users → PMF Signal).
+
+**How it works.** Rules enforce specificity ("Reddit" isn't; "r/SaaS" is), manual-only (no ads, no automation), and asking for a conversation — never a sale. Templates come with `[bracket]` personalization points.
+
+---
+
+### `/startup-growth-strategy`
+
+**What it does.** Designs a compounding growth engine rooted in product-driven word of mouth.
+
+**When to use.** You have users and need a 90-day plan to reach 1,000 with a natural growth loop and disciplined channel selection.
+
+**How to invoke.** `/startup-growth-strategy`, or *"growth plan"*, *"how do I grow"*, *"acquisition strategy"*. Asks for idea + current user count + target customer if missing.
+
+**What you get.** Natural Growth Loop (type, speed, strength %) → Top 3 Acquisition Channels (with CAC, time-to-results, 1-week test) → Referral Mechanism (built-in, not bolted on) → 90-day week-by-week plan (Foundation / Amplify / Compound) → The Single Metric (leading, not lagging) + "if you stopped marketing today" test.
+
+**How it works.** PG "make something people want and tell their friends" framing. Enforces: retention <40% weekly → fix retention first; content marketing / SEO aren't strategies; a referral program is a bribe, not a referral.
+
+---
+
+### `/seo`
+
+**What it does.** Universal SEO analysis — audits, page/tech/content/schema/images/sitemap reviews, Generative Engine Optimization for AI Overviews / ChatGPT / Perplexity, and strategic planning.
+
+**When to use.** Any SEO work on a URL or site: full audit, page-level review, schema generation, AI-search readiness, or strategic planning by industry.
+
+**How to invoke.** Subcommand + URL or business type:
+
+- `/seo audit <url>` — full site audit
+- `/seo page <url>` — single-page deep dive
+- `/seo schema <url>` — detect / validate / generate structured data
+- `/seo geo <url>` — AI Overviews / ChatGPT / Perplexity readiness
+- `/seo plan <business-type>` — strategic SEO roadmap
+
+Also fires on *"SEO"*, *"Core Web Vitals"*, *"E-E-A-T"*, *"AI Overviews"*, *"technical SEO"*, *"structured data"*.
+
+**What you get.** Unified report with SEO Health Score (0–100, weighted across 7 categories) → industry detection → prioritized action plan (Critical → Low) → subcommand-specific deliverables (sitemap, schema markup, competitor pages, hreflang tags).
+
+**How it works.** Orchestrates 12 sub-skills + 6 subagents (`seo-technical`, `seo-content`, `seo-schema`, `seo-sitemap`, `seo-performance`, `seo-visual`) in parallel. Enforces quality gates (hard stop at 50+ location pages, ban on HowTo schema post-deprecation, use INP not FID). Reference files load on-demand.
+
+---
+
+### `/market-research`
+
+**What it does.** Scrapes free demand signals across multiple sources and ranks keyword opportunities for content and SEO.
+
+**When to use.** You want keyword opportunities, article ideas, or demand signal around a topic for US / T1 audiences — grounded in real search data, not guesses.
+
+**How to invoke.** *"market research"*, *"keyword research"*, *"find keywords"*, *"article ideas"*. Pass seeds via `--only "topic1, topic2"` — your phrases are used verbatim with no suffixes. Defaults to built-in seeds if none given.
+
+**What you get.** Raw + scored JSON files dated in the skill directory → top-50 console dump → a final markdown report with Top 10 opportunities table, per-keyword content strategy, quick wins, cluster strategy, seasonality notes, and priority ranking.
+
+**How it works.** Runs `node keyword-research.js` which scrapes Google Autocomplete (with a–z expansion), YouTube Autocomplete, Google Related Searches HTML, Reddit post titles, and Google Trends. Cross-source count is the core demand signal.
+
+---
+
+### `/marketing-reddit`
+
+**What it does.** Finds relevant Reddit posts, comments on them, or creates new threads — human-sounding and channel-tailored.
+
+**When to use.** You want to search Reddit authentically, leave tailored comments on matched or URL-given posts, or create a new thread in a specific subreddit. Built for real engagement, not spam.
+
+**How to invoke.** Natural language — *"find reddit posts about X"*, *"comment on this reddit URL"*, *"post to r/SaaS with title ..."*. Triggers include *"reddit find/search/reply/comment"*, *"post on reddit"*, *"create reddit post"*, *"submit to reddit"*, or a Reddit URL with a comment request.
+
+**What you get.** Ranked posts list (score, comments, date, author, permalink) → posted-comments summary table with URLs → created-thread summary table with the new post URL.
+
+**How it works.** Uses `curl` / `urllib` against Reddit's public JSON search API (last-3-days filter) for search, then **Playwright MCP** (`browser_run_code` with stable locators on the Lexical composer) for comments and threads. Enforces strict human style: no em dashes, no sycophancy, no all-lowercase-AI voice.
+
+---
+
+### `/cmux-diff`
+
+**What it does.** Launches a VSCode-style sidebar changes/diff viewer for the current working directory.
+
+**When to use.** You want a browser-based sidebar UI to scan changed files and diffs instead of reading `git diff` in the terminal.
+
+**How to invoke.** `/cmux-diff`, or *"show changes"*, *"changes panel"*, *"diff viewer"*. Operates on `$PWD`.
+
+**What you get.** A background-running local web server (port auto-detected) opened in the cmux browser. Log at `$XDG_STATE_HOME/cmux-diff/`.
+
+**How it works.** Bash-only skill. Ensures `~/Scripts/cmux-diff` has `bun` deps installed, spawns `bun run src/cli.ts --dry-run` in the background, scrapes the port from the log, and calls `cmux browser open`.
+
+---
+
+### `/worktree-task`
+
+**What it does.** Runs a task in an isolated git worktree so it doesn't conflict with in-flight changes in your main checkout.
+
+**When to use.** Single-session tasks that need filesystem / branch isolation from the main working tree. **Not** for multi-session parallel work or security sandboxing — worktrees don't isolate env vars, network, credentials, or spawned processes.
+
+**How to invoke.** `/worktree-task <task>`, or *"do X in a worktree"*, *"run this in an isolated branch"*, *"work on Y without conflicting with my current changes"*, *"spin up a worktree for Z"*.
+
+**What you get.** A new worktree + branch (`wt/<slug>-<ts>`) at a sibling path, the task executed there, then a 5-option cleanup menu: (a) keep, (b) merge, (c) rebase + push + PR, (d) discard, (e) stash and keep, (f) adopt branch into main tree.
+
+**How it works.** Thin auditable wrapper around `git worktree add`. Uses `cd "$WT_PATH" && …` per call since cwd doesn't persist. Enforces typed-`yes` gates on destructive ops, `--force-with-lease` on push, and merge-base safety checks before `-d` / `-D`. Preflight aborts on submodule / detached-HEAD / path-collision without explicit user direction.
 
 ---
 
@@ -67,9 +317,9 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 ### Why the roster is good
 
 - **Specialists, not generalists.** Each agent has a narrow charter and opinions. No "helpful assistant" filler.
-- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` assembles a panel.
+- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` or `/orchestrate` assembles a panel.
 - **Global-market coverage.** The marketing roster covers both Western and Chinese platforms at native depth — rare in public agent collections.
-- **Composable.** The Agents Orchestrator and `/dda` skill are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
+- **Composable.** The Agents Orchestrator, `/orchestrate`, and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
 
 ---
 
@@ -77,17 +327,21 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 
 ```
 ~/.claude/
-├── README.md                ← you are here
-├── skills/                  ← custom slash commands
+├── README.md                    ← you are here
+├── skills/                      ← custom slash commands
+│   ├── orchestrate/
+│   ├── next-feature/
 │   ├── dda/
+│   ├── code-review/
 │   ├── shark-tank/
 │   ├── git-audit/
 │   ├── seo/
 │   ├── market-research/
 │   ├── marketing-reddit/
 │   ├── cmux-diff/
-│   └── startup-*/           ← six-skill Paul Graham playbook
-└── agents/                  ← specialist subagent roster
+│   ├── worktree-task/
+│   └── startup-*/               ← six-skill Paul Graham playbook
+└── agents/                      ← specialist subagent roster
     ├── engineering/
     ├── testing/
     ├── design/
@@ -103,10 +357,14 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 
 ## Using it
 
-Skills: type the slash command (e.g. `/dda`, `/shark-tank`) in Claude Code. They're auto-discovered from `~/.claude/skills/`.
+**Skills:** type the slash command (e.g. `/dda`, `/orchestrate`, `/shark-tank`) in Claude Code. They're auto-discovered from `~/.claude/skills/`.
 
-Agents: Claude dispatches them via the Agent tool. Invoke implicitly ("have a security engineer review this") or explicitly through `/dda`, which picks the right panel for you.
+**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda` or `/orchestrate`, which assemble the right panel or teams for you.
 
 ## The pattern
 
-Skills codify *workflows* — the sequence of steps you'd want every time. Agents codify *perspectives* — the domain lens a specialist brings. `/dda` is the bridge: a workflow that assembles perspectives on demand. That's the whole philosophy of this repo.
+Skills codify *workflows* — the sequence of steps you'd want every time.
+Agents codify *perspectives* — the domain lens a specialist brings.
+`/dda`, `/orchestrate`, and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
+
+That's the whole philosophy of this repo.
