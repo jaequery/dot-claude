@@ -1,9 +1,28 @@
 {
   "name": "jaequery",
   "version": "1.0.0",
-  "description": "Jae Lee's full arsenal: 17 skills (startup planning, code review, multi-agent orchestration, SEO, Reddit marketing, cmux-diff) plus 167 specialist subagents across engineering, design, product, growth, game-dev, and specialized domains.",
+  "description": "Jae Lee's full arsenal: 17 slash-command skills (startup planning, multi-agent orchestration, code review, SEO, Reddit marketing, git audit, diff viewer) plus 167 specialist subagents across engineering, design, product, marketing, paid-media, sales, game-dev, and specialized domains.",
   "author": {
     "name": "Jae Lee",
     "url": "https://github.com/jaequery"
-  }
+  },
+  "homepage": "https://github.com/jaequery/dot-claude",
+  "repository": "https://github.com/jaequery/dot-claude",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "subagents",
+    "agents",
+    "orchestration",
+    "multi-agent",
+    "tournament",
+    "code-review",
+    "seo",
+    "startup",
+    "shark-tank",
+    "git-audit",
+    "worktree",
+    "marketing",
+    "engineering"
+  ]
 }
