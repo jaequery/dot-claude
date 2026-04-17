@@ -1,14 +1,18 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "jaequery",
   "owner": {
-    "name": "Jae Lee",
-    "url": "https://github.com/jaequery"
+    "name": "Jae Lee"
   },
   "plugins": [
     {
       "name": "jaequery",
-      "source": ".",
-      "description": "Jae Lee's full arsenal — 17 skills + 167 specialist subagents bundled into one install."
+      "description": "Jae Lee's full arsenal — 17 skills + 167 specialist subagents bundled into one install.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jaequery/dot-claude.git"
+      },
+      "homepage": "https://github.com/jaequery/dot-claude"
     }
   ]
 }
