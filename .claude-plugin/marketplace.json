@@ -8,10 +8,7 @@
     {
       "name": "jaequery",
       "description": "Jae Lee's full arsenal — 17 skills + 167 specialist subagents bundled into one install.",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/jaequery/dot-claude.git"
-      },
+      "source": "./plugins/jaequery",
       "homepage": "https://github.com/jaequery/dot-claude"
     }
   ]

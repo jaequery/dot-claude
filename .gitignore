@@ -1,13 +1,15 @@
 # Ignore everything
 *
 
-# Except the plugin content at the repo root
+# Except the marketplace catalog at the repo root
 !.claude-plugin/
 !.claude-plugin/**
-!skills/
-!skills/**
-!agents/
-!agents/**
+
+# And the plugin subtree
+!plugins/
+plugins/*
+!plugins/jaequery/
+!plugins/jaequery/**
 
 # And the repo-level meta
 !.gitignore
@@ -16,5 +18,5 @@
 !CONTRIBUTING.md
 
 # Skill runtime outputs — not part of the shipped plugin
-skills/market-research/keyword-research-*.json
-skills/market-research/keyword-research-*.md
+plugins/jaequery/skills/market-research/keyword-research-*.json
+plugins/jaequery/skills/market-research/keyword-research-*.md
