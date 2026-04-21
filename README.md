@@ -4,16 +4,53 @@ My personal Claude Code arsenal — custom slash-command skills and a curated ro
 
 ## Install
 
-This repo is a Claude Code plugin marketplace. Inside Claude Code, run:
+This repo is a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). You install it from *inside* a Claude Code session — you do not `git clone` it.
+
+### Prerequisites
+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and working (`claude --version`).
+- Network access to GitHub from your Claude Code host.
+
+### Steps
+
+1. **Start Claude Code** in any directory: `claude`
+2. **Add the marketplace:**
+   ```
+   /plugin marketplace add jaequery/dot-claude
+   ```
+   This registers the `jaequery` marketplace. It does *not* install anything yet.
+3. **Install the plugin:**
+   ```
+   /plugin install jaequery@jaequery
+   ```
+   The syntax is `<plugin-name>@<marketplace-name>`. Both are `jaequery`.
+4. **Verify:** type `/` and look for entries under `jaequery:*`. You should see `/jaequery:orchestrate`, `/jaequery:shark-tank`, `/jaequery:dda`, etc.
+
+### Using it after install
+
+- **Skills** — type the slash command, e.g. `/jaequery:shark-tank`, `/jaequery:code-review`, `/jaequery:seo audit https://example.com`. See the [Skill Guides](#skill-guides) below for every skill.
+- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` / `/jaequery:orchestrate` to assemble a panel automatically.
+
+### Updating
 
 ```
-/plugin marketplace add jaequery/dot-claude
-/plugin install jaequery@jaequery
+/plugin marketplace update jaequery
 ```
 
-That's it. All 17 skills and 167 subagents are now available. Skills invoke as `/jaequery:<skill-name>` (e.g. `/jaequery:shark-tank`, `/jaequery:orchestrate`). Subagents are available to the Task tool under their original `subagent_type` names.
+Fetches the latest skills and agents from this repo.
 
-To update later: `/plugin marketplace update jaequery`.
+### Uninstall
+
+```
+/plugin uninstall jaequery@jaequery
+/plugin marketplace remove jaequery
+```
+
+### Troubleshooting
+
+- **`/plugin` command not found** — your Claude Code version is too old; update it.
+- **Skills don't show up after install** — restart the Claude Code session so it re-scans plugins.
+- **`marketplace add` fails on network error** — check you can reach `github.com` (the marketplace is served from this repo's default branch).
 
 ---
 
