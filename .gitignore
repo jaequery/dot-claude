@@ -16,6 +16,7 @@ plugins/*
 !README.md
 !LICENSE
 !CONTRIBUTING.md
+!CLAUDE.md
 
 # Skill runtime outputs — not part of the shipped plugin
 plugins/jaequery/skills/market-research/keyword-research-*.json
