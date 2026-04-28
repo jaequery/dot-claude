@@ -69,6 +69,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
 - [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
+- [`/linear-design`](#linear-design) — File a Linear ticket for a design task, run `/team-design`, post each variant's screenshots back as comments on the ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
@@ -164,6 +165,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Pulls the top 5 ENG-team Todo tickets, processes each one sequentially: own worktree, own branch (`team-build/eng-123-…`), own PR. Linear state moves Todo → In Progress → In Review per ticket; final table shows verdicts and PR URLs.*
+
+---
+
+### `/linear-design`
+
+**What it does.** Files a Linear ticket for a design task, runs `/team-design` to produce divergent variants in parallel, then posts each variant's screenshots back to the ticket as a comment so stakeholders who don't live in the terminal can review and pick from Linear.
+
+**When to use.** Design exploration where the picker audience (PM, design lead, founder) reviews in Linear, not in the terminal. Skip if you're solo and a local picker is enough — use `/team-design` directly.
+
+**How to invoke.** `/linear-design <task description> [flags]`. Linear flags: `--team <key>` (required unless single-team workspace), `--priority <0-4>`, `--label <name>` (repeatable), `--assignee <me|email|userId>`, `--project <name|id>`, `--existing <IDENT>` (attach to an existing ticket instead of creating). Passthrough to `/team-design`: `--variants <N>`, `--target-branch`, `--branch-prefix`, `--reference` (repeatable). Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and `jq` + `curl`.
+
+**What you get.** New Linear ticket with the brief in the description → `/team-design` runs end-to-end → one comment per variant on the ticket with desktop / mobile / interactive screenshots embedded as Linear-hosted assets (uploaded via the `fileUpload` mutation), thesis, branch name, Lead's scores, and critique → final summary comment with the picker table. Local `/team-design` picker prints to the terminal as usual; shipping is a separate local action.
+
+**How it works.** All Linear reads/writes go through the `linear` CLI. `linear api` is used only as the escape hatch for `fileUpload` (signed URL → PUT bytes → embed `assetUrl` in markdown) and `issueCreate` fields not exposed by structured subcommands — never raw `curl` to the GraphQL endpoint. Hard rules: one ticket per run, one comment per variant (never batched), every PASS/REDO comment includes uploaded screenshots (or an explicit "shots not captured" note), never auto-transitions the ticket's workflow state, never auto-ships from Linear comments.
+
+**Example.**
+
+```
+/linear-design redesign the pricing page with 3 directions --team DSGN --variants 3 --priority 2
+```
+
+*Creates `DSGN-87` with the brief, runs `/team-design` for 3 variants in parallel, uploads each variant's screenshots to Linear and posts them as comments inline, ends with a picker summary comment — reviewers see and discuss directly on the ticket while the operator runs the local picker to ship.*
 
 ---
 
@@ -566,6 +589,7 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 │   ├── team-build/
 │   ├── team-design/
 │   ├── linear-team-build/
+│   ├── linear-design/
 │   ├── next-feature/
 │   ├── dda/
 │   ├── code-review/
