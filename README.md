@@ -97,6 +97,7 @@ A sequenced, zero-to-one operating system:
 
 - [`/cmux-diff`](#cmux-diff) — Sidebar diff viewer for the current repo.
 - [`/worktree-task`](#worktree-task) — Run a task in an isolated git worktree.
+- [`/debug-trace`](#debug-trace) — Cursor-style AI debug mode: injects fire-and-forget HTTP probes into source, captures runtime values via a local daemon, removes every probe before exit.
 
 ---
 
@@ -152,11 +153,11 @@ A sequenced, zero-to-one operating system:
 
 **When to use.** Burning down a triaged Linear backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle Linear state transitions and PR creation.
 
-**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default: all selected tickets concurrently; pass 1 to force sequential; warns above 5 but does not cap), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
+**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default: 1 / sequential; pass a number to parallelize; warns above 5 but does not cap), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
 
-**What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → move to "In Progress" → invoke `/team-build` → verify exactly one new PR appeared → comment PR URL on Linear → move to "In Review") → final summary table.
+**What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → move to "In Progress" → **post a "build started" status comment** with working branch / target / mode → invoke `/team-build` → verify exactly one new PR appeared → for UX/design tickets, capture desktop+mobile+state screenshots via Playwright and upload to Linear → comment PR URL (with embedded shots when applicable) → move to "In Review") → final summary table. Stakeholders following the ticket in Linear see status comments at start and finish without watching the terminal.
 
-**How it works.** All Linear reads/writes go through the `linear` CLI — `linear issue query --json` to fetch the queue, `linear issue view --json` to pull `branchName`, `linear issue update --state` for transitions, `linear issue comment add --body-file` for comments. No raw GraphQL `curl`. **Working branch defaults to Linear's suggested `branchName`** (e.g. `jaequery/pin-56-...`) and is passed to `/team-build` via `--working-branch`; only falls back to `team-build/<slug>-<ts>` when Linear has none. Per-ticket *target* branch (PR base) resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce.
+**How it works.** All Linear reads/writes go through the `linear` CLI — `linear issue query --json` to fetch the queue, `linear issue view --json` to pull `branchName`, `linear issue update --state` for transitions, `linear issue comment add --body-file` for comments. No raw GraphQL `curl`. **Working branch defaults to Linear's suggested `branchName`** (e.g. `jaequery/pin-56-...`) and is passed to `/team-build` via `--working-branch`; only falls back to `team-build/<slug>-<ts>` when Linear has none. Per-ticket *target* branch (PR base) resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce. **Push is not gated** — `/team-build`'s typed-`yes` push confirmation is explicitly skipped so backlog burndown stays autonomous; the PR itself is the review surface.
 
 **Example.**
 
@@ -547,6 +548,28 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 ```
 
 *Creates `../repo-wt/refactor-auth-20260416/` on branch `wt/refactor-auth-20260416`, runs the refactor inside it without touching your in-flight changes in the main checkout, then offers the 5-option cleanup menu — pick (c) to push and open a PR.*
+
+---
+
+### `/debug-trace`
+
+**What it does.** Cursor-style runtime instrumentation debugger. Spins up a tiny localhost daemon, injects fire-and-forget HTTP probes into the user's source at suspect sites, captures runtime values as the program runs, reads them back through the daemon, iterates toward a fix, and **removes every probe before exiting**. Print-debugging on autopilot, with cleanup as a hard invariant.
+
+**When to use.** A bug whose cause is opaque from reading the code — you need to see actual runtime values at specific points without manually scattering and cleaning up `console.log`s.
+
+**How to invoke.** `/debug-trace <bug description>`, or *"instrument and run"*, *"trace these values"*, *"cursor-style debug"*, *"inject debug logs"*, *"find this bug by tracing values"*.
+
+**What you get.** Pre-flight orphan-marker scan → daemon started on a free loopback port (zero-deps Node) → a one-sentence hypothesis → suspect sites instrumented with marker-wrapped probes (UUID per probe, language-appropriate idiom) → user runs the failing scenario → AI reads the JSONL dump, compares actual vs expected, narrows or fixes → mandatory cleanup pass (`git grep '@debug-trace:'` must be empty), daemon shutdown, `.debug-trace/` deleted → final report.
+
+**How it works.** Two pieces: `scripts/daemon.js` (zero-deps, loopback-only, `/log` `/dump` `/clear` `/health` `/shutdown`, body cap 1MB, 10k-line ring rotation) and a SKILL.md that codifies the injection contract — every probe wrapped in `@debug-trace:<uuid>` open/close marker comments using the file's native syntax, every HTTP call fire-and-forget so daemon-down never alters program flow, idiom table covering JS/TS, Python, Go, Ruby, Java/Kotlin, Shell, Rust, C/C++. Cleanup is non-negotiable: never end a turn with markers in the working tree; first action on next invocation is to scan for and remove orphans.
+
+**Example.**
+
+```
+/debug-trace orderTotal is wrong on the checkout page when a discount applies
+```
+
+*Daemon starts on `127.0.0.1:64157`, AI hypothesizes "discount is double-applied", drops 4 marker-wrapped `fetch()` probes around the discount pipeline in `src/checkout/total.ts`, asks the user to reproduce, reads the dump, sees `subtotal=42 discount=4 total=34` (off by `discount` applied twice), proposes the one-line fix, removes all four probe blocks, shuts down the daemon — `git grep '@debug-trace:'` is empty.*
 
 ---
 
