@@ -74,6 +74,7 @@ query Todos($teamKey: String, $assigneeId: String, $first: Int!) {
       assignee { name email }
       team { key name }
       labels { nodes { name } }
+      attachments { nodes { sourceType url } }
     }
   }
 }
@@ -95,6 +96,38 @@ tickets? (yes / no / subset like '1,3,5')". Default = all.
 
 For each selected ticket, in order, run the sub-routine below. Print
 the running results table after each ticket finishes.
+
+### 3a-pre. Resolve the target branch for this ticket
+
+Each ticket can specify its own PR base. Resolve in this order; first
+match wins:
+
+1. **Description directive.** Scan `$DESCRIPTION` for a line matching
+   (case-insensitive) `^\s*(Target|Branch|Base)\s*:\s*([^\s]+)\s*$`.
+   Capture group 2 is the branch name.
+2. **Label.** Any label named `target:<branch>` or `base:<branch>`.
+   Strip the prefix, the rest is the branch name.
+3. **Linked branch attachment.** Check `attachments.nodes` for an entry
+   with `sourceType` of `gitBranch` / `github` / `gitlab`. If the URL
+   resolves to a branch (e.g. `…/tree/<branch>` or
+   `…/-/tree/<branch>`), use that branch.
+4. **CLI default.** Fall back to the `--target` flag (default `main`).
+
+Validate the resolved branch exists locally OR on `origin`:
+```
+git show-ref --verify --quiet "refs/heads/$RESOLVED" \
+  || git ls-remote --exit-code --heads origin "$RESOLVED"
+```
+
+If neither, **STOP this ticket** (do not silently fall back to `main`):
+- Comment on the Linear ticket: "team-build skipped: target branch
+  `$RESOLVED` does not exist locally or on origin."
+- Move the ticket back to **Todo**.
+- Record verdict `SKIPPED` in the results table and continue to the
+  next ticket.
+
+Print the resolution per ticket, e.g.:
+`ENG-123 → target=feature/auth (from description directive)`
 
 ### 3a. Build the team-build invocation
 
@@ -145,9 +178,10 @@ Snapshot PR list before:
 PRS_BEFORE=$(gh pr list --state open --json number,headRefName,url --limit 200)
 ```
 
-Call `/team-build` via the Skill tool with `args`:
+Call `/team-build` via the Skill tool with `args` — pass the
+**ticket-resolved** branch from §3a-pre, not the global `--target`:
 ```
---branch $TARGET
+--branch $RESOLVED
 
 <prompt body from §3a>
 ```
