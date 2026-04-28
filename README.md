@@ -24,12 +24,12 @@ This repo is a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/
    /plugin install jaequery@jaequery
    ```
    The syntax is `<plugin-name>@<marketplace-name>`. Both are `jaequery`.
-4. **Verify:** type `/` and look for entries under `jaequery:*`. You should see `/jaequery:orchestrate`, `/jaequery:shark-tank`, `/jaequery:dda`, etc.
+4. **Verify:** type `/` and look for entries under `jaequery:*`. You should see `/jaequery:team-build`, `/jaequery:shark-tank`, `/jaequery:dda`, etc.
 
 ### Using it after install
 
 - **Skills** — type the slash command, e.g. `/jaequery:shark-tank`, `/jaequery:code-review`, `/jaequery:seo audit https://example.com`. See the [Skill Guides](#skill-guides) below for every skill.
-- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` / `/jaequery:orchestrate` to assemble a panel automatically.
+- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` / `/jaequery:team-build` to assemble a panel automatically.
 
 ### Updating
 
@@ -66,7 +66,8 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 
 ### Decision & review
 
-- [`/orchestrate`](#orchestrate) — Tournament of rival teams with an independent eval gate.
+- [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
+- [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel grades a plan A–F, Master Brain issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
@@ -99,31 +100,53 @@ A sequenced, zero-to-one operating system:
 
 ## Skill Guides
 
-### `/orchestrate`
+### `/team-build`
 
-**What it does.** Runs a tournament-style multi-team decision or build: 2–4 rival teams of specialists each produce a complete attempt, iterate for 3 rounds on private critiques, go all-out in a Finals round, and one winner passes an independent eval gate before shipping.
+**What it does.** Acts as a Team Lead orchestrating a build end-to-end: plans the work, dispatches 2–10 specialist subagents with explicit orders, runs a security audit and a QA + code-review gate, and loops until the work is bug-free. Runs in an isolated git worktree; optionally pushes to a target branch and opens a PR.
 
-**When to use.** When the *approach itself* is an open question, the task benefits from best-of-N rather than a single opinion, or the stakes justify 4–6× dispatch cost. Not for routine tasks.
+**When to use.** Multi-domain features that benefit from a panel of specialists (UI + backend + security) and where you want a hard QA gate before shipping. Not for trivial edits.
 
-**How to invoke.** `/orchestrate <task>` or phrases like *"run a tournament"*, *"field competing teams"*, *"best-of-N"*, *"multi-team showdown"*. One clarifying question allowed; everything else (bracket size, team diversity, acceptance bar, eval method) is decided by the orchestrator.
+**How to invoke.** `/team-build <task>` or *"build this with a team"*, *"team-build"*, *"chief executive build"*. Optional `--branch <target>` to auto-push and open a PR against that branch.
 
-**What you get.** Bracket announcement → Round 1/2/3 submissions → Finals → weighted judging table → eval-gate PASS/FAIL report with evidence → final winner (with each team's trajectory) → runner-up salvage notes → next actions and known limits.
+**What you get.** Worktree at `../<repo>.team-build-<slug>-<ts>` on branch `team-build/<slug>-<ts>`. Plan announcement → roster → parallel build round → integration check → security audit → code-review + QA gate → APPROVED report (or up to 3 fix rounds). With `--branch`, a typed-`yes` push gate and `gh pr create`.
 
-**How it works.** Each team runs in isolation (no rival visibility) for the improvement rounds. Finals reveal sanitized rival summaries and loosen constraints. An independent eval panel — declared up front — runs the winner against acceptance criteria. Patch-and-retry capped at 2, extra-round at 1, re-field at 1; after that it escalates to you rather than shipping a "Frankenstein winner."
+**How it works.** Hard rules: never write to the main working tree, never bypass hooks, never `--no-verify`, push only after typed-`yes`. The Lead never claims completion without the QA + code-review gate passing.
 
 **Example.**
 
 ```
-/orchestrate design the pricing page for a dev tool that serves hobbyists and enterprise buyers
+/team-build add OAuth login with Google and GitHub --branch main
 ```
 
-*Two audiences with opposite needs — rival teams explore different pricing archetypes (freemium / tiered / hybrid), iterate over three rounds, and the winner ships only after passing a conversion-proxy eval gate.*
+*Spins up a worktree, fields a Team Lead with a backend, frontend, security, and code-review squad, builds across them in parallel, audits the diff, and opens a PR against `main` only after the QA gate passes.*
+
+---
+
+### `/linear-team-build`
+
+**What it does.** Pulls every Linear ticket in **Todo** status and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per ticket**. Never bundles tickets.
+
+**When to use.** Burning down a triaged Linear backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle Linear state transitions and PR creation.
+
+**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1, cap 5), `--dry-run`. Requires `LINEAR_API_KEY` and authed `gh`.
+
+**What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → move to "In Progress" → invoke `/team-build` → verify exactly one new PR appeared → comment PR URL on Linear → move to "In Review") → final summary table.
+
+**How it works.** Per-ticket target branch resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce.
+
+**Example.**
+
+```
+/linear-team-build --team ENG --limit 5
+```
+
+*Pulls the top 5 ENG-team Todo tickets, processes each one sequentially: own worktree, own branch (`team-build/eng-123-…`), own PR. Linear state moves Todo → In Progress → In Review per ticket; final table shows verdicts and PR URLs.*
 
 ---
 
 ### `/next-feature`
 
-**What it does.** Plans the single most useful next feature for the current project by running an `/orchestrate` tournament of rival feature proposals.
+**What it does.** Plans the single most useful next feature for the current project by running a tournament of rival feature proposals.
 
 **When to use.** When you want a grounded, judged decision on *what to ship next* — not a brainstorm list or a feature parade.
 
@@ -131,7 +154,7 @@ A sequenced, zero-to-one operating system:
 
 **What you get.** Tournament bracket → each team's feature submission → weighted scoring table → one winner with a 9-point plan (name, description, strategic case, user story, scope, effort, risks, success metric, implementation sketch) → runner-up salvage → next actions.
 
-**How it works.** Auto-scans `README`, `CLAUDE.md`, manifest, `git log`, `git shortlog`, and roadmap files. Fields 2–4 strategy-lensed teams (e.g. "User Value", "Growth", "Foundation", "Quick Win"). Inherits the full `/orchestrate` playbook including the independent eval gate — and refuses to ship a weak winner (reruns once or escalates).
+**How it works.** Auto-scans `README`, `CLAUDE.md`, manifest, `git log`, `git shortlog`, and roadmap files. Fields 2–4 strategy-lensed teams (e.g. "User Value", "Growth", "Foundation", "Quick Win"). Runs the full tournament playbook with an independent eval gate — and refuses to ship a weak winner (reruns once or escalates).
 
 **Example.**
 
@@ -505,9 +528,9 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 ### Why the roster is good
 
 - **Specialists, not generalists.** Each agent has a narrow charter and opinions. No "helpful assistant" filler.
-- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` or `/orchestrate` assembles a panel.
+- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` or `/team-build` assembles a panel.
 - **Global-market coverage.** The marketing roster covers both Western and Chinese platforms at native depth — rare in public agent collections.
-- **Composable.** The Agents Orchestrator, `/orchestrate`, and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
+- **Composable.** The Agents Orchestrator, `/team-build`, and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
 
 ---
 
@@ -517,7 +540,8 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 ~/.claude/
 ├── README.md                    ← you are here
 ├── skills/                      ← custom slash commands
-│   ├── orchestrate/
+│   ├── team-build/
+│   ├── linear-team-build/
 │   ├── next-feature/
 │   ├── dda/
 │   ├── code-review/
@@ -545,14 +569,14 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 
 ## Using it
 
-**Skills:** type the slash command (e.g. `/dda`, `/orchestrate`, `/shark-tank`) in Claude Code. They're auto-discovered from `~/.claude/skills/`.
+**Skills:** type the slash command (e.g. `/dda`, `/team-build`, `/shark-tank`) in Claude Code. They're auto-discovered from `~/.claude/skills/`.
 
-**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda` or `/orchestrate`, which assemble the right panel or teams for you.
+**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda` or `/team-build`, which assemble the right panel or teams for you.
 
 ## The pattern
 
 Skills codify *workflows* — the sequence of steps you'd want every time.
 Agents codify *perspectives* — the domain lens a specialist brings.
-`/dda`, `/orchestrate`, and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
+`/dda`, `/team-build`, and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
 
 That's the whole philosophy of this repo.
