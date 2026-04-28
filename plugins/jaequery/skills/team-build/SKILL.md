@@ -183,6 +183,62 @@ fix round (back to §3 with a narrower scope) before continuing. Mediums
 are judgment calls; the Team Lead decides. Lows/Info are noted in the final
 report but do not block.
 
+## 4.5 Polish & gap pass — what is the user missing?
+
+Before the QA gate, the Team Lead runs an explicit "what did we miss"
+pass. Users specify the obvious thing they want; the bar for shipping is
+the obvious thing **plus** the surrounding details a thoughtful
+collaborator would catch. The Team Lead is responsible for those
+details, not the user.
+
+Read the diff and the original task once more, then walk through this
+checklist and write a **gap list** (file + concrete fix per item):
+
+- **Edge cases.** Empty input, very large input, unicode/i18n, network
+  failure, race conditions, repeated submissions, slow connection.
+- **States.** Loading, empty, error, success, partial-success, offline,
+  unauthenticated, no-permission. UI surfaces should handle all that
+  apply, not just the happy path.
+- **Errors.** Are failures user-actionable? No raw stack traces in the
+  UI. Server errors logged with enough context to debug. Retries where
+  retry is safe.
+- **Accessibility (UI).** Keyboard navigation, focus order, visible
+  focus ring, semantic HTML, alt text, color contrast, reduced-motion
+  respected, screen-reader labels on icon-only buttons.
+- **Responsive (UI).** Renders cleanly at narrow (mobile), medium
+  (tablet), and wide (desktop) widths. No horizontal overflow. Touch
+  targets ≥ 44×44.
+- **Performance.** No obvious N+1 query, no synchronous work on the
+  request path that should be async, no full-table scans on hot paths,
+  bundle isn't bloated by an accidental whole-library import.
+- **Observability.** New code paths log enough to debug a prod
+  incident. Metrics on anything user-visible. No `console.log` left
+  behind.
+- **Config & secrets.** New env vars documented (README/`.env.example`).
+  No secrets committed. Sensible defaults for local dev.
+- **Docs.** README/CHANGELOG/inline doc updated where the public surface
+  changed. Migration notes if behavior shifted.
+- **Tests.** Coverage matches the project's existing bar — happy path
+  + at least one failure mode for the new behavior.
+- **Cleanup.** No dead code, no commented-out code, no TODOs, no debug
+  prints, no scratch files committed.
+- **Project-specific gotchas.** Anything in `CLAUDE.md`, `AGENTS.md`,
+  `CONTRIBUTING.md`, or recent commit messages that this build should
+  honor (commit conventions, lint rules, banned APIs, deprecation
+  paths).
+
+Then ask one harder question: **"If I were the user, what would I
+*notice* and ask about in 24 hours?"** Write down 1–3 such items.
+
+If the gap list is non-trivial, dispatch a **polish round** (back to §3
+scoped to the gap list only — no scope creep) before §5. Small,
+mechanical gaps the Team Lead can fix inline; anything domain-specific
+(a11y, performance, error UX) goes to the matching specialist.
+
+If the gap list is trivial or empty, record that fact in the §6 final
+report under **"Polish pass"** and proceed. Do not skip this step
+silently — even an empty list must be acknowledged.
+
 ## 5. QA + code review gate
 
 Dispatch the `Code Reviewer` and the chosen QA agent **in parallel**.
