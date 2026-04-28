@@ -213,6 +213,48 @@ Team Lead stops and hands back to the user with: a status report, what's
 blocking, and a recommendation (continue, change scope, or abandon).
 Don't burn tokens grinding past a structural problem — escalate.
 
+## 5.5 Visual evidence (screenshots)
+
+Once §5 verdict is APPROVED, capture before/after screenshots that show the
+task was actually resolved. These are committed to the branch and rendered
+inline in the PR body so reviewers see the change without checking out.
+
+Pick the mode that fits the diff:
+
+- **UI / web work** — use Playwright MCP
+  (`mcp__playwright__browser_navigate`, `mcp__playwright__browser_take_screenshot`).
+  Boot the dev server (or use a deployed preview if the project has one),
+  navigate to the affected route(s), and capture at minimum:
+  - The golden path of the new behavior (1–3 shots).
+  - One edge case or error state if the ticket called one out.
+  If the project has a known-good baseline (production URL, `main` build),
+  also capture a "before" shot for visual diff.
+- **CLI / backend / infra** — capture a terminal transcript instead. Run
+  the relevant command(s) (test suite output, the new endpoint via
+  `curl`, the migration applying cleanly) and save the transcript as
+  `evidence-<step>.txt`. Skip image capture; the PR body links the file.
+- **Pure refactor with no observable surface** — skip this section
+  entirely and note "no visual surface" in the §6 final report.
+
+Save artifacts under `$WT_PATH/.team-build/evidence/`:
+```
+$WT_PATH/.team-build/evidence/
+  01-before-<slug>.png
+  02-after-<slug>.png
+  03-edge-<slug>.png
+  notes.md          # optional: 1–2 lines per shot describing what to look at
+```
+
+Commit the evidence directory in its own commit:
+`docs(team-build): add visual evidence for <slug>`. GitHub renders
+images committed to the branch when the PR body references them via
+relative paths, so no external host is needed.
+
+If Playwright MCP is unavailable, or the dev server can't boot in this
+environment, do NOT fabricate shots. Note the limitation in the §6
+report ("evidence not captured: <reason>") and let the user decide
+whether to capture manually before merging.
+
 ## 6. Ship
 
 When the verdict is APPROVED, the Team Lead produces a **final report**:
@@ -242,6 +284,13 @@ When the verdict is APPROVED, the Team Lead produces a **final report**:
 Then choose the ship path based on `$TARGET_BRANCH`:
 
 ### 6a. `$TARGET_BRANCH` was provided — push and open PR
+
+Before pushing, append a **`## Visual evidence`** section to the PR body
+listing each captured artifact with a one-line caption and a relative
+markdown image link (`![caption](.team-build/evidence/02-after-<slug>.png)`).
+GitHub renders images committed to the branch. If §5.5 was skipped
+("no visual surface" or "not captured: <reason>"), state that explicitly
+in the same section instead of omitting it.
 
 1. Detect remote: `git -C "$REPO_ROOT" remote get-url origin`. If no
    `origin`, abort the push and tell the user how to add one — leave the
