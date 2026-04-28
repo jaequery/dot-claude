@@ -194,14 +194,14 @@ ESCALATED, or FAILED.
 
 After it returns, verify isolation:
 - `gh pr list` must now show **exactly one** new open PR vs.
-  `PRS_BEFORE` whose head ref starts with `tb/<ticket-slug>-`.
+  `PRS_BEFORE` whose head ref starts with `team-build/<ticket-slug>-`.
   Zero or more than one new PR → STOP the loop and report.
 - The new branch and PR number must be unique across this run's
   results table.
 
 ### 3d. Capture the outcome
 
-Record: PR URL, PR number, branch name (must start with `tb/`),
+Record: PR URL, PR number, branch name (must start with `team-build/`),
 worktree path, verdict, rounds run.
 
 ### 3e. Update Linear
@@ -226,7 +226,7 @@ Mutations: `commentCreate { issueId, body }` and
 
 `--parallel N > 1`:
 - N ticket subroutines run concurrently. Each `/team-build` produces
-  its own worktree (`tb/...`), so they don't collide.
+  its own worktree (`team-build/...`), so they don't collide.
 - Cap at N=5 regardless of user request.
 - Warn: shared `gh` auth may hit GitHub rate limits with many quick
   PRs.
@@ -260,7 +260,7 @@ Default: keep.
   worktree, or team-build invocation.
 - **Verify isolation between tickets.** Snapshot `gh pr list` before
   each call; confirm exactly one new PR with head ref
-  `tb/<ticket-slug>-*` after. Zero or more than one → STOP.
+  `team-build/<ticket-slug>-*` after. Zero or more than one → STOP.
 - **No branch/PR reuse.** Branch name and PR number must be unique
   across the run.
 - **Clean-code bar is part of the contract.** The §3a clause is

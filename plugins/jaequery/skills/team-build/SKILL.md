@@ -48,7 +48,7 @@ Compute:
 - `$REPO_NAME` — basename of `$REPO_ROOT`.
 - `$SLUG` — 2–4 kebab-case words from the task (`^[a-z0-9][a-z0-9-]{0,39}$`).
 - `$TS` — `date +%Y%m%d-%H%M%S`.
-- `$BRANCH` — `tb/$SLUG-$TS` (`tb` = team-build).
+- `$BRANCH` — `team-build/$SLUG-$TS`.
 - `$WT_PATH` — `$(dirname $REPO_ROOT)/$REPO_NAME.tb-$SLUG-$TS`.
 - `$BASE_BRANCH` — current branch, or `main`/`master` if detached.
 - `$BASE_SHA` — `git rev-parse HEAD`.
