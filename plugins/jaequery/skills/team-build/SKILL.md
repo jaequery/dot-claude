@@ -84,6 +84,117 @@ the user can audit. From now on, **all** Read/Edit/Write use absolute paths
 under `$WT_PATH/…`, and every Bash call needing the worktree as cwd
 prefixes `cd "$WT_PATH" && …` in the same call.
 
+## 1.5 Per-worktree database branch (ORM-agnostic, auto-detected)
+
+Parallel worktrees that all hit the same dev database trample each
+other's data. This step gives each worktree its own logical database
+on the project's existing dev DB server, so the build can migrate,
+seed, and exercise data without touching anyone else's state.
+
+**This step is best-effort.** At every check below, on miss/failure,
+log the reason in the plan announcement and continue without a
+per-worktree DB. Do not block the build.
+
+### Detect
+
+1. **Compose file.** `$REPO_ROOT/docker-compose.yml`, `compose.yml`, or
+   `docker-compose.yaml`. None present → skip §1.5 entirely.
+2. **DB service.** `docker compose -f $COMPOSE_FILE config --format json`
+   and pick the first service whose `image` matches one of:
+   `postgres`, `postgis/postgis`, `mysql`, `mariadb`, `mongo`. Multiple
+   matches → ask the user once which to use. Zero → skip §1.5.
+3. **Connection details.** Prefer parsing the parent `DATABASE_URL`
+   from `$REPO_ROOT/.env` (then `.env.local`, then `.env.example`) —
+   it's the authoritative source of how the project actually connects.
+   Fall back to the service's `environment:` block in compose
+   (`POSTGRES_USER/PASSWORD/DB`, `MYSQL_USER/PASSWORD/DATABASE`,
+   `MONGO_INITDB_*`) and the `ports:` mapping for the host port.
+   Capture: scheme, user, password, host, port, parent dbname.
+
+### Create the branch DB
+
+1. Bring the service up from the repo root (idempotent):
+   ```
+   cd "$REPO_ROOT" && docker compose up -d <db-service>
+   ```
+2. Wait until ready, polling the right liveness probe for the image:
+   - Postgres: `docker compose exec -T <svc> pg_isready -U $USER`
+   - MySQL/MariaDB: `docker compose exec -T <svc> mysqladmin ping -u root -p$ROOT_PASS`
+   - Mongo: `docker compose exec -T <svc> mongosh --quiet --eval "db.runCommand({ping:1}).ok"`
+3. Generate `DB_BRANCH`:
+   ```
+   DB_BRANCH="${PARENT_DB}_$(echo "${SLUG}_${TS}" | tr '-' '_' | tr 'A-Z' 'a-z' | cut -c1-50)"
+   ```
+   Total length must stay ≤63 chars (Postgres identifier limit). Trim
+   `PARENT_DB` first if needed.
+4. Create the branch DB via `docker compose exec` (no host clients
+   required):
+   - **Postgres:**
+     ```
+     docker compose exec -T <svc> psql -U "$USER" -d postgres \
+       -c "CREATE DATABASE \"$DB_BRANCH\" OWNER \"$USER\";"
+     ```
+   - **MySQL / MariaDB:**
+     ```
+     docker compose exec -T <svc> mysql -uroot -p"$ROOT_PASS" \
+       -e "CREATE DATABASE \`$DB_BRANCH\`; \
+           GRANT ALL ON \`$DB_BRANCH\`.* TO '$USER'@'%';"
+     ```
+   - **Mongo:** no-op — Mongo creates databases implicitly on first
+     write. Just compose the new URL.
+5. Compose the new `DATABASE_URL` by replacing the parent dbname
+   in the parsed parent URL with `$DB_BRANCH`. Write it (and any
+   related vars like `DIRECT_URL`, `SHADOW_DATABASE_URL` if the parent
+   `.env` defined them — apply the same dbname swap) to:
+   ```
+   $WT_PATH/.env
+   ```
+   Compose's auto-load + the agents inheriting cwd make this picked up
+   automatically by every command run inside the worktree.
+
+### Bootstrap (best-effort, ORM-agnostic)
+
+Run from `$WT_PATH` so the new `DATABASE_URL` is in scope. Try in this
+order; **first match runs, the rest are skipped**:
+
+1. **`package.json` scripts** — try `db:setup`, then `db:migrate`,
+   then `migrate`, then `db:reset` (whichever exists in `scripts`).
+   Run via the project's package manager (`pnpm`/`yarn`/`npm` —
+   detect by lockfile).
+2. **`Makefile` targets** — `make db-setup`, `make migrate`, `make db-reset`.
+3. **Python**:
+   - `alembic upgrade head` if `alembic.ini` exists.
+   - `python manage.py migrate` if `manage.py` exists (Django).
+4. **Ruby** — `bin/rails db:setup` if `bin/rails` exists.
+5. **Go** — `go run ./cmd/migrate` if that path exists.
+6. **None matched** → log "no bootstrap script detected; agents will
+   handle schema" and continue.
+
+After migrations, attempt a seed step (same first-match logic):
+`db:seed` / `seed` (package.json), `make seed`, `python manage.py loaddata` (if a fixture is committed), `bin/rails db:seed`. No match → skip silently.
+
+If a bootstrap step fails, capture the error, surface it in the plan
+announcement under "DB bootstrap failed: <why>", and continue. The
+agents can still operate against an empty branch DB.
+
+### Tell the agents
+
+Append this line to every agent dispatch prompt in §3:
+
+> A per-worktree database has been provisioned. The connection string
+> is in `$WT_PATH/.env` as `DATABASE_URL`. Use it for any DB work in
+> this build. Do not connect to the parent dev database. If you change
+> schema, generate a new migration in the project's normal way (e.g.
+> `prisma migrate dev`, `alembic revision --autogenerate`,
+> `bin/rails generate migration`) — do NOT hand-edit migration files.
+
+### Print before §2
+
+Add to the plan announcement:
+```
+**Per-worktree DB:** $DB_BRANCH on <db-service> (skipped: <reason> | bootstrapped: <step> | empty)
+```
+
 ## 2. Team Lead's plan (internal, then announced)
 
 Before dispatching anyone, the Team Lead produces a written plan:
@@ -376,6 +487,25 @@ in the same section instead of omitting it.
    uncommitted changes survived push), fall back to asking the user
    whether to force-remove or keep — do not silently leave artifacts
    without flagging.
+10. **Drop the per-worktree DB** if §1.5 created one. Run from
+    `$REPO_ROOT` against the same compose service:
+    - **Postgres:**
+      ```
+      docker compose exec -T <svc> psql -U "$USER" -d postgres \
+        -c "DROP DATABASE IF EXISTS \"$DB_BRANCH\" WITH (FORCE);"
+      ```
+    - **MySQL / MariaDB:**
+      ```
+      docker compose exec -T <svc> mysql -uroot -p"$ROOT_PASS" \
+        -e "DROP DATABASE IF EXISTS \`$DB_BRANCH\`;"
+      ```
+    - **Mongo:**
+      ```
+      docker compose exec -T <svc> mongosh "$BRANCH_URL" \
+        --quiet --eval "db.dropDatabase()"
+      ```
+    Failures here are non-fatal — log and continue. Skip entirely if
+    §1.5 was skipped.
 
 ### 6b. No target branch — hand back the worktree
 
@@ -393,6 +523,12 @@ the `/worktree-task` skill:
 
 For destructive options, follow `/worktree-task`'s typed-`yes` gates and
 discard rules verbatim — do not invent shortcuts.
+
+If §1.5 created a per-worktree DB and the user picks **(d) discard**
+or **(f) adopt branch**, also drop the branch DB using the §6a step 10
+commands. For **(c) rebase + push**, run the §6a step 10 cleanup after
+the PR is opened. For **(a)/(b)/(e)**, leave the branch DB in place —
+the user is still using it.
 
 ## 7. Failure recovery (read-only reference)
 
