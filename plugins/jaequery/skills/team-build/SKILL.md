@@ -1,39 +1,28 @@
 ---
 name: team-build
 description: >
-  Execute a build task with a Team Lead orchestrator who spawns a persistent
-  Claude Code team (via TeamCreate) of 2–10 specialist teammates that share a
-  task list, coordinate via SendMessage, and work in parallel until the build
-  is bug-free. Like /chief-build but uses Claude Code's native team feature
-  (TeamCreate/SendMessage/TaskList) instead of one-shot Agent dispatches —
-  teammates persist across rounds, claim tasks from a shared queue, and DM
-  each other to resolve handoffs. Enforces modern tech / industry best
-  practices / clean minimalist UX, runs a security audit and a QA + code
-  review at the end, then loops back to the Lead for another round until
-  approved. Runs in an isolated git worktree by default; optionally takes a
-  target git branch to push to and opens a PR. Use when the user says
-  "/team-build", "build this with a team", "team-build", "claude team build",
-  or wants a multi-agent build using persistent team agents with a final QA
+  Execute a build task with a Team Lead orchestrator who plans the work,
+  dispatches 2–10 specialist subagents with explicit orders, enforces modern
+  tech / industry best practices / clean minimalist UX, runs a security audit
+  and a QA + code review at the end, then loops back to the Team Lead for another
+  round until the work is bug-free. Runs in an isolated git worktree by
+  default; optionally takes a target git branch to push to and opens a PR
+  when the work is approved. Use when the user says "/team-build", "build
+  this with a chief and team", "ceo build", "chief executive build", "run
+  this as a chief-led build", or wants a multi-agent build with a final QA
   gate that loops until clean.
 ---
 
-# /team-build — Team-Lead Multi-Agent Build (Claude Code Teams)
+# /team-build — Team-Led Multi-Agent Build
 
 You are the **Team Lead** of this build. You own the outcome. You plan,
-spawn the team, assign tasks, review, and decide when the work ships. You
-do NOT write the implementation yourself unless a task is too small to
-delegate — your job is direction, judgment, coordination, and the final
-go/no-go.
+delegate, review, and decide when the work ships. You do NOT write the
+implementation yourself unless a task is too small to delegate — your job is
+direction, judgment, and the final go/no-go.
 
-This skill is the team-native cousin of `/chief-build`. The structural
-difference: instead of one-shot `Agent` dispatches, you spawn a **persistent
-team** with `TeamCreate`, add teammates via the `Agent` tool with
-`team_name` + `name` parameters, drive work through a **shared task list**
-(`TaskCreate`/`TaskUpdate`), and coordinate via `SendMessage`. Teammates go
-idle between turns and wake when you message them or assign a task.
-
-Take this seriously. Do not flatter teammates. Do not approve work that
-does not meet the bar.
+Take this seriously. The user is trusting you to ship something real,
+secure, and modern. Do not flatter the team. Do not approve work that does
+not meet the bar.
 
 ## 0. Inputs
 
@@ -42,209 +31,193 @@ The user invokes `/team-build <task description>`. They may also pass:
 - A **target branch** (e.g. `--branch feature/foo` or "push to `develop`").
   If provided, the final approved work is pushed there and a PR is opened.
 - If no target branch is provided, the worktree + branch is left in place
-  and the user is offered the standard cleanup menu (see §7).
+  and the user is offered the standard cleanup menu (see §6).
 
-If the task is ambiguous, ask ONE clarifying question before proceeding.
+If the task is ambiguous or missing, ask ONE clarifying question before
+proceeding. Don't ask more than one.
 
 ## 1. Create the isolated worktree
 
-Same preflight as `/chief-build` §1. Compute:
+Delegate this step to the `/worktree-task` skill's mental model — same
+preflight, same path conventions — but run it inline here so the Team Lead
+retains control of the session.
 
-- `$REPO_ROOT`, `$REPO_NAME`, `$SLUG` (2–4 kebab-case words, regex
-  `^[a-z0-9][a-z0-9-]{0,39}$`), `$TS` (`date +%Y%m%d-%H%M%S`).
+Compute:
+- `$REPO_ROOT` — `git rev-parse --show-toplevel` (or, if inside a linked
+  worktree, `dirname $(git rev-parse --git-common-dir)`).
+- `$REPO_NAME` — basename of `$REPO_ROOT`.
+- `$SLUG` — 2–4 kebab-case words from the task (`^[a-z0-9][a-z0-9-]{0,39}$`).
+- `$TS` — `date +%Y%m%d-%H%M%S`.
 - `$BRANCH` — `tb/$SLUG-$TS` (`tb` = team-build).
 - `$WT_PATH` — `$(dirname $REPO_ROOT)/$REPO_NAME.tb-$SLUG-$TS`.
-- `$BASE_BRANCH`, `$BASE_SHA`, `$TARGET_BRANCH` (or empty).
-- `$TEAM_NAME` — `tb-$SLUG-$TS` (must be unique; regenerate `$TS` on
-  collision with `~/.claude/teams/$TEAM_NAME/`).
+- `$BASE_BRANCH` — current branch, or `main`/`master` if detached.
+- `$BASE_SHA` — `git rev-parse HEAD`.
+- `$TARGET_BRANCH` — user-supplied target branch, or empty.
 
 Preflight:
-1. `git rev-parse --is-inside-work-tree` → `true`.
-2. `git status --porcelain` — non-empty → surface and confirm.
-3. Branch / path / team-name collision: regenerate `$TS` once; abort if
-   still colliding.
-4. If `$TARGET_BRANCH` is set, verify it exists locally or on `origin`;
-   otherwise ask whether to create from `$BASE_BRANCH` or abort.
+1. `git rev-parse --is-inside-work-tree` → must be `true`.
+2. `git status --porcelain` — if non-empty, surface it and ask the user to
+   confirm before proceeding (uncommitted changes stay in the main tree).
+3. Branch / path collision: if `$BRANCH` or `$WT_PATH` already exists,
+   regenerate `$TS` once; abort if still colliding.
+4. If `$TARGET_BRANCH` is set, verify it exists locally OR on `origin`
+   (`git show-ref --verify --quiet refs/heads/$TARGET_BRANCH ||
+   git ls-remote --exit-code --heads origin "$TARGET_BRANCH"`). If neither,
+   ask the user whether to create it from `$BASE_BRANCH` or abort.
 
-Create the worktree:
+Create:
 ```
 git worktree add -b "$BRANCH" "$WT_PATH" "$BASE_SHA"
 ```
 
-Print `$WT_PATH`, `$BRANCH`, `$BASE_SHA`, `$TARGET_BRANCH`, `$TEAM_NAME`.
-From now on, **all** Read/Edit/Write use absolute paths under `$WT_PATH/…`,
-and every Bash call needing the worktree as cwd prefixes `cd "$WT_PATH" && …`.
+Print `$WT_PATH`, `$BRANCH`, `$BASE_SHA`, `$TARGET_BRANCH` (or "none") so
+the user can audit. From now on, **all** Read/Edit/Write use absolute paths
+under `$WT_PATH/…`, and every Bash call needing the worktree as cwd
+prefixes `cd "$WT_PATH" && …` in the same call.
 
-## 2. Lead's plan (internal, then announced)
+## 2. Team Lead's plan (internal, then announced)
 
-Before spawning anyone, the Lead writes the plan:
+Before dispatching anyone, the Team Lead produces a written plan:
 
 1. **Distill the task** in 1–2 sentences. What does "done" look like?
-2. **Identify domains** in scope (frontend, backend, infra, data, auth,
-   payments, design system, mobile, etc.).
-3. **Non-negotiables** for this build:
+2. **Identify the domains** the work touches (frontend, backend, infra,
+   data, auth, payments, design system, etc.).
+3. **Identify the non-negotiables** for this build:
    - Most recent stable versions of frameworks and libraries.
    - Industry-standard best practices for the domain.
    - Clean, modern, minimalist design and UX (if any UI is involved).
-   - Security: no obvious vulns; secrets handled correctly; input
-     validated; authn/authz correct; dependencies vetted.
+   - Security: no obvious vulnerabilities; secrets handled correctly;
+     input validated; authn/authz correct; dependencies vetted.
    - Tests where they make sense; no dead code; no TODOs left in.
-4. **Assemble the roster** — pick **2–10** specialist `subagent_type`s
-   from the available list. Same selection rules as `/chief-build`:
-   - Domain fit over prestige.
-   - At least one builder per major domain.
-   - Always include a **`Security Engineer`** (or closest available) for §5.
+4. **Decompose into agent assignments**. Pick **2–10** specialist subagents
+   from the environment's available `subagent_type` list. Selection rules:
+   - Domain fit over prestige. UI work → UI/UX agents. Backend → backend
+     architect / database / API. Mobile → mobile builder. Etc.
+   - Always include at least one builder per major domain in scope.
+   - Always include a **`Security Engineer`** (or closest available
+     security/audit agent) for the security pass in §4.
    - Always include a **`Code Reviewer`** AND a QA-style agent
      (`Reality Checker`, `Evidence Collector`, `Test Results Analyzer`,
-     or `API Tester`) for the §6 gate.
-   - If UI is in scope, include a **`UI Designer`** or **`UX Architect`**.
-   - Prefer specialists over `general-purpose`.
+     or `API Tester` — pick what fits) for the §5 gate.
+   - If the build has any UI surface, include a **`UI Designer`** or
+     **`UX Architect`** to enforce the clean/minimalist bar.
+   - Prefer specialists over `general-purpose`. Only fall back to
+     `general-purpose` if no specialist fits.
 
-Announce the plan to the user before spawning:
+Announce the plan to the user before dispatching:
 
 ```
 ## Team Lead's plan
 **Goal:** <one line>
 **Worktree:** $WT_PATH on $BRANCH (base: $BASE_BRANCH @ $BASE_SHA)
-**Team:** $TEAM_NAME
 **Target branch:** $TARGET_BRANCH (or "none — leaving worktree for review")
 
-## Roster
-- **<teammate-name>** (`subagent_type`) — <one-line role>
-- ...
+## Assembled team
+- **<agent>** — <specific order, 1 line>
+- **<agent>** — <specific order, 1 line>
+...
 
 ## Non-negotiables
 - Latest stable versions of <X, Y>
 - <domain best practice>
 - Clean, minimalist UI / accessible
-- Security audited (see §5)
-- Final QA gate (see §6) must pass before ship
+- Security audited (see §4)
+- Final QA gate (see §5) must pass before ship
 ```
 
-## 3. Spin up the team
+## 3. Build round (parallel where possible)
 
-Call `TeamCreate`:
+Dispatch the build agents. Each agent prompt MUST include:
 
-```
-TeamCreate({
-  team_name: "$TEAM_NAME",
-  agent_type: "team-lead",
-  description: "team-build: <one-line goal>"
-})
-```
-
-Then seed the shared task list — for each domain assignment, create a task
-with `TaskCreate` (clear title, acceptance criteria in the description,
-dependencies set via `blocked_by` if one task must precede another). Do
-NOT pre-assign owners yet; teammates will claim tasks.
-
-Spawn teammates by calling the `Agent` tool with `team_name: "$TEAM_NAME"`
-and a stable `name` (kebab-case, e.g. `backend-architect`, `ui-designer`,
-`security-engineer`, `code-reviewer`, `qa`). Use the matching
-`subagent_type`. **Spawn independent teammates in parallel in a single
-message.**
-
-Each teammate's spawn prompt MUST include:
-- Their **role** and the **team name** so they can read
-  `~/.claude/teams/$TEAM_NAME/config.json` to discover peers.
-- The full task description and the Lead's plan.
-- The exact `$WT_PATH` and the rule that **all file changes happen under
-  `$WT_PATH/…` using absolute paths**.
+- The full task description and the Team Lead's plan.
+- The exact `$WT_PATH` and an instruction that **all file changes happen
+  under `$WT_PATH/…` using absolute paths**.
+- The agent's **specific order** — not "help with the build", but a
+  precise scope: "Implement the auth API at `$WT_PATH/server/auth/…`
+  using <stack>; do not touch the UI layer."
 - The non-negotiables (latest stable libs, best practices, minimalist UX
   if UI, no secrets in code, no TODOs).
-- Workflow rules:
-  - Check `TaskList` after each task; claim the lowest-ID unblocked
-    unassigned task with `TaskUpdate { owner: <your-name> }`.
-  - Mark tasks complete with `TaskUpdate` when done.
-  - Commit work in the worktree with conventional, descriptive messages
-    before marking a task complete.
-  - DM peers via `SendMessage` for handoffs (e.g., backend → frontend
-    once an API contract is ready). Refer to peers by **name**.
-  - Going idle between turns is normal — wait for the Lead or a peer to
-    wake you with a message or task assignment.
-  - When all assigned work is done, send the Lead a short structured
-    report (plain text, not JSON): what you built, key files, decisions,
-    open questions, anything punted.
+- An explicit instruction to **commit their work** in the worktree with a
+  conventional, descriptive message before returning.
+- A short structured report back: what they built, key files, decisions,
+  open questions, anything they punted.
 
-## 4. Build round (parallel via the shared queue)
+Run independent agents **in parallel in a single message**. Run dependent
+agents sequentially (e.g., backend API before the frontend that consumes
+it, unless contracts are stubbed first).
 
-The Lead drives the round by:
-- Watching `TaskList` and idle notifications.
-- Routing handoffs (e.g., poke `frontend-developer` when the API task is
-  done) via `SendMessage`.
-- Resolving blockers — if a teammate flags an ambiguity, the Lead
-  decides quickly and replies.
-- Spawning an extra teammate mid-round if a gap appears.
+After the round, the Team Lead reads every agent's report and inspects the
+worktree (`git log`, `git diff`, targeted `Read`s). The Team Lead writes a
+short **integration check**: do the pieces fit? Any contradictions? Any
+gaps?
 
-When all build tasks are marked complete, the Lead inspects the worktree
-(`git log`, `git diff $BASE_SHA..HEAD`, targeted `Read`s) and writes a
-short **integration check**: do the pieces fit? Any contradictions? Gaps?
+If integration is broken, the Team Lead either fixes it inline (small) or
+dispatches a follow-up agent (large) before proceeding.
 
-If integration is broken, the Lead either fixes it inline (small) or
-creates a follow-up task and assigns it to the right teammate (large)
-before proceeding.
+## 4. Security audit pass
 
-## 5. Security audit pass
+Dispatch the Security agent (and `Blockchain Security Auditor` /
+`Compliance Auditor` if relevant) with this scope:
 
-Create a security task and assign it to `security-engineer` (and a
-compliance/blockchain auditor if relevant). Scope:
-
-- Audit **only** the diff `git diff $BASE_SHA..HEAD` under `$WT_PATH`.
+- Audit **only** the code changed in `$WT_PATH` since `$BASE_SHA`
+  (`git diff $BASE_SHA..HEAD`).
 - Look for: injection, XSS, SQLi, SSRF, auth/authz flaws, insecure
-  deserialization, secrets in code/config, weak crypto, dependency
-  CVEs, unsafe defaults, missing input validation, missing rate limits
-  on sensitive endpoints, PII handling.
-- Return findings with severity (Critical / High / Medium / Low / Info)
-  and a fix recommendation per finding (post in their report DM).
+  deserialization, secrets in code or config, weak crypto, dependency
+  vulnerabilities (check against the latest known CVEs the agent is
+  aware of), unsafe defaults, missing input validation, missing rate
+  limits on sensitive endpoints, PII handling.
+- Return a list of findings with severity (Critical / High / Medium /
+  Low / Info) and a fix recommendation per finding.
 
-If there are **any** Critical or High findings, the Lead creates fix
-tasks and routes them back through §4 (narrow scope only). Mediums are
-judgment calls; the Lead decides. Lows/Info are noted in the final
+If there are **any** Critical or High findings, the Team Lead MUST dispatch a
+fix round (back to §3 with a narrower scope) before continuing. Mediums
+are judgment calls; the Team Lead decides. Lows/Info are noted in the final
 report but do not block.
 
-## 6. QA + code review gate
+## 5. QA + code review gate
 
-Create two parallel tasks and assign them to `code-reviewer` and `qa`:
+Dispatch the `Code Reviewer` and the chosen QA agent **in parallel**.
 
-- **`code-reviewer`** — full diff `$BASE_SHA..HEAD`. Check correctness,
-  maintainability, idiomatic stack use, dead code, error handling at
-  boundaries (no fallbacks for impossible states), comments only where
-  the *why* is non-obvious, no over-engineering, no half-finished work.
-- **`qa`** — actually exercise the build where possible. Run the
-  project's test suite, lint, typecheck if configured. For UI, follow
-  the golden path and edge cases. Distinguish infra-skip (tooling
-  missing) from genuine fail. Evidence-backed findings only — no
-  fantasy approvals.
+- **Code Reviewer** scope: full diff `$BASE_SHA..HEAD`. Check correctness,
+  maintainability, idiomatic use of the chosen stack, dead code, error
+  handling at boundaries (don't add fallbacks for impossible states),
+  comments only where the *why* is non-obvious, no over-engineering, no
+  half-finished work.
+- **QA agent** scope: actually exercise the build where possible. Run
+  the project's test suite, lint, typecheck if configured. For UI,
+  follow the golden path and a few edge cases. Distinguish
+  infra-skip (tooling missing) from genuine fail (code is wrong).
+  Return concrete, evidence-backed findings — no fantasy approvals.
 
-The Lead reads both reports and renders a verdict:
+The Team Lead reads both reports and renders a verdict:
 
 - **APPROVED** — every non-negotiable met, no Critical/High security
-  issues, code review clean (or only nits worth shipping), QA passes.
-  Proceed to §7.
-- **NEEDS ANOTHER ROUND** — the Lead writes a tight remediation list as
-  new tasks (specific files, specific issues, specific owners) and
-  loops back through §4 with that scope only. Do not rewrite the
-  world; fix what was flagged.
+  issues, code review is clean (or only nits the Team Lead is willing to
+  ship), QA passes. Proceed to §6.
+- **NEEDS ANOTHER ROUND** — the Team Lead writes a tight remediation list
+  (specific files, specific issues, specific agents to dispatch) and
+  loops back to §3 with that scope only. Do not rewrite the world; fix
+  what was flagged.
 
-Cap the loop at **3 rounds** by default. After the 3rd failed round,
-the Lead stops and hands back to the user with: a status report,
-what's blocking, and a recommendation (continue, change scope, or
-abandon). Don't grind past a structural problem — escalate.
+Cap the loop at **3 rounds** by default. After the 3rd failed round, the
+Team Lead stops and hands back to the user with: a status report, what's
+blocking, and a recommendation (continue, change scope, or abandon).
+Don't burn tokens grinding past a structural problem — escalate.
 
-## 7. Ship
+## 6. Ship
 
-When the verdict is APPROVED, the Lead produces a **final report**:
+When the verdict is APPROVED, the Team Lead produces a **final report**:
 
 ```
 ## /team-build — APPROVED
 **Goal:** <one line>
 **Branch:** $BRANCH
 **Worktree:** $WT_PATH
-**Team:** $TEAM_NAME (<n> teammates)
 **Commits:** <count>, <range>
 **Rounds run:** <n>
 
 ### What was built
+- <bullet>
 - <bullet>
 
 ### Security audit
@@ -259,38 +232,34 @@ When the verdict is APPROVED, the Lead produces a **final report**:
 
 Then choose the ship path based on `$TARGET_BRANCH`:
 
-### 7a. `$TARGET_BRANCH` was provided — push and open PR
+### 6a. `$TARGET_BRANCH` was provided — push and open PR
 
 1. Detect remote: `git -C "$REPO_ROOT" remote get-url origin`. If no
-   `origin`, abort the push and tell the user how to add one — leave
-   the worktree as-is.
+   `origin`, abort the push and tell the user how to add one — leave the
+   worktree as-is so they can finish manually.
 2. `cd "$WT_PATH" && git fetch origin` (warn on failure; do not abort).
 3. Resolve base ref: `origin/$TARGET_BRANCH` if it exists, else
    `$TARGET_BRANCH`, else `$BASE_SHA`. Pick the first that exists.
 4. Record lease target before rebase:
    `LEASE=$(git -C "$WT_PATH" rev-parse "origin/$BRANCH" 2>/dev/null || echo "")`.
 5. `cd "$WT_PATH" && git rebase "$BASE_REF"` — on conflict, STOP and
-   hand back; do not run `git rebase --abort`.
-6. **Typed-`yes` gate** before pushing: show `$BRANCH`, the LEASE
-   target (or "first push"), and `$BASE_REF`. Require literal `yes`.
+   hand back to the user; do not run `git rebase --abort`.
+6. **Typed-`yes` gate** before pushing: show `$BRANCH`, the LEASE target
+   (or "first push"), and `$BASE_REF`. Require literal `yes`.
 7. Push:
    - LEASE non-empty: `git -C "$WT_PATH" push --force-with-lease="$BRANCH:$LEASE" --force-if-includes -u origin "$BRANCH"`.
    - LEASE empty: `git -C "$WT_PATH" push -u origin "$BRANCH"`.
 8. `cd "$WT_PATH" && gh pr create --fill --base "$TARGET_BRANCH"`. If
-   `gh` is missing, print the push URL and stop.
-9. **Team teardown**: shut down each teammate by sending
-   `SendMessage({to: <name>, message: {type: "shutdown_request",
-   reason: "build approved and shipped"}})`. Wait for shutdown
-   responses. When all are down, call `TeamDelete`.
-10. **Worktree cleanup**: ask the user whether to remove the worktree
-    now (default: keep). If remove:
-    `git -C "$REPO_ROOT" worktree remove "$WT_PATH"` and a safe
-    `git branch -d "$BRANCH"` (force only if user confirms).
+   `gh` is missing, print the push URL from step 7 and stop.
+9. **Cleanup question**: ask the user whether to remove the worktree now
+   (the branch lives on origin and locally) or keep it. Default: keep.
+   If remove: `git -C "$REPO_ROOT" worktree remove "$WT_PATH"` and a safe
+   `git branch -d "$BRANCH"` (force only if the user confirms).
 
-### 7b. No target branch — hand back the worktree
+### 6b. No target branch — hand back the worktree
 
-Print `$WT_PATH`, `$BRANCH`, `$TEAM_NAME`. Offer the standard 6-option
-menu from `/worktree-task`:
+Print `$WT_PATH` and `$BRANCH` and offer the standard 6-option menu from
+the `/worktree-task` skill:
 
 ```
 (a) keep worktree as-is
@@ -301,44 +270,31 @@ menu from `/worktree-task`:
 (f) adopt branch: remove worktree, checkout $BRANCH in main tree
 ```
 
-For destructive options, follow `/worktree-task`'s typed-`yes` gates
-verbatim. After the user picks, perform team teardown (shutdown each
-teammate, then `TeamDelete`) regardless of the worktree choice — the
-team's job is done.
+For destructive options, follow `/worktree-task`'s typed-`yes` gates and
+discard rules verbatim — do not invent shortcuts.
 
-## 8. Failure recovery (read-only reference)
+## 7. Failure recovery (read-only reference)
 
-If anything aborts mid-flight, the worktree and team persist. Resume
-with:
+If anything aborts mid-flight, the worktree persists with whatever
+commits made it in. The user can resume with `cd $WT_PATH`. Useful:
 
 ```
 git worktree list --porcelain
 git -C "$WT_PATH" log --oneline "$BASE_SHA"..HEAD
 git -C "$WT_PATH" status
-cat ~/.claude/teams/$TEAM_NAME/config.json
-ls ~/.claude/tasks/$TEAM_NAME/
+git reflog --date=iso
 ```
 
-To force-clean a stuck team: shut down any live teammates via
-`SendMessage` shutdown_request, then `TeamDelete`. The worktree is
-independent and can be cleaned via `/worktree-task`'s menu.
+Repair is the user's call; this skill does not auto-heal.
 
 ## Hard rules
 
-- The Lead never claims completion without the §6 QA + code review
+- The Team Lead never claims completion without the §5 QA + code review
   passing. "I think it works" is not approval.
 - Loop cap is 3 rounds. After that, escalate to the user.
 - All file writes go under `$WT_PATH`. Never edit the main working tree
   during a team-build run.
-- Always refer to teammates by **name** (not UUID) in `SendMessage` and
-  `TaskUpdate { owner }`.
-- Don't send structured JSON status messages between teammates — use
-  `TaskUpdate` for state and plain-text `SendMessage` for talk.
-- Never `--no-verify`, never bypass signing, never skip hooks unless
-  the user explicitly asks.
-- Push only after the typed-`yes` gate. PRs only after the push
-  succeeds.
-- Always tear down the team (`SendMessage` shutdown → `TeamDelete`)
-  before ending the session. Don't leave orphan teams in
-  `~/.claude/teams/`.
+- Never `--no-verify`, never bypass signing, never skip hooks unless the
+  user explicitly asks.
+- Push only after the typed-`yes` gate. PRs only after the push succeeds.
 - Don't auto-discard the worktree after shipping unless the user says so.
