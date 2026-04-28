@@ -260,10 +260,17 @@ Then choose the ship path based on `$TARGET_BRANCH`:
    - LEASE empty: `git -C "$WT_PATH" push -u origin "$BRANCH"`.
 8. `cd "$WT_PATH" && gh pr create --fill --base "$TARGET_BRANCH"`. If
    `gh` is missing, print the push URL from step 7 and stop.
-9. **Cleanup question**: ask the user whether to remove the worktree now
-   (the branch lives on origin and locally) or keep it. Default: keep.
-   If remove: `git -C "$REPO_ROOT" worktree remove "$WT_PATH"` and a safe
-   `git branch -d "$BRANCH"` (force only if the user confirms).
+9. **Auto-cleanup after successful push + PR**: once the PR has been
+   opened (the branch lives on origin and locally), remove the worktree
+   automatically — no question:
+   ```
+   git -C "$REPO_ROOT" worktree remove "$WT_PATH"
+   git -C "$REPO_ROOT" branch -d "$BRANCH"   # safe delete; skip if it fails (unmerged)
+   ```
+   Print one line confirming both. If `worktree remove` fails (e.g.
+   uncommitted changes survived push), fall back to asking the user
+   whether to force-remove or keep — do not silently leave artifacts
+   without flagging.
 
 ### 6b. No target branch — hand back the worktree
 
@@ -306,4 +313,7 @@ Repair is the user's call; this skill does not auto-heal.
 - Never `--no-verify`, never bypass signing, never skip hooks unless the
   user explicitly asks.
 - Push only after the typed-`yes` gate. PRs only after the push succeeds.
-- Don't auto-discard the worktree after shipping unless the user says so.
+- After a successful push + PR open in §6a, **always remove the worktree
+  and the local branch** (the work is now on origin). Only keep them
+  when ESCALATED/FAILED, or when `worktree remove` fails — in which
+  case prompt the user instead of silently leaving artifacts.

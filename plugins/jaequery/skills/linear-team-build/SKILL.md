@@ -298,14 +298,17 @@ Processed: N tickets
 | ENG-123  | APPROVED  | https://github.com/.../pull/45  | 1      |
 | ENG-130  | ESCALATED | (no PR — see worktree)          | 3      |
 
-Worktrees still on disk:
+Worktrees still on disk (only ESCALATED/FAILED — APPROVED tickets are
+auto-cleaned by /team-build §6a):
 - /path/to/repo.team-build-eng-130-...  (ENG-130, escalated)
 
 Linear updates posted: <count>
 ```
 
-Offer cleanup: "Remove kept worktrees for APPROVED tickets? (yes/no)".
-Default: keep.
+APPROVED tickets have their worktree + local branch removed
+automatically by `/team-build`. Only ESCALATED/FAILED worktrees
+persist for manual debugging. Do not prompt to clean up APPROVED
+worktrees here — they are already gone.
 
 ## Hard rules
 

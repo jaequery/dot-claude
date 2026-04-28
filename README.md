@@ -106,9 +106,9 @@ A sequenced, zero-to-one operating system:
 
 **When to use.** Multi-domain features that benefit from a panel of specialists (UI + backend + security) and where you want a hard QA gate before shipping. Not for trivial edits.
 
-**How to invoke.** `/team-build <task>` or *"build this with a team"*, *"team-build"*, *"chief executive build"*. Optional `--branch <target>` to auto-push and open a PR against that branch.
+**How to invoke.** `/team-build <task>` or *"build this with a team"*, *"team-build"*, *"chief executive build"*. Optional `--branch <target>` to auto-push and open a PR against that branch. Optional `--working-branch <name>` to override the auto-generated `team-build/<slug>-<ts>` branch (used verbatim, no prefix added — useful for honoring upstream conventions like Linear's suggested `branchName`).
 
-**What you get.** Worktree at `../<repo>.team-build-<slug>-<ts>` on branch `team-build/<slug>-<ts>`. Plan announcement → roster → parallel build round → integration check → security audit → code-review + QA gate → APPROVED report (or up to 3 fix rounds). With `--branch`, a typed-`yes` push gate and `gh pr create`.
+**What you get.** Worktree at `../<repo>.team-build-<slug>-<ts>` on branch `team-build/<slug>-<ts>` (or your `--working-branch` override). Plan announcement → roster → parallel build round → integration check → security audit → code-review + QA gate → APPROVED report (or up to 3 fix rounds). With `--branch`, a typed-`yes` push gate, `gh pr create`, then **automatic cleanup** — the worktree and local branch are removed once the PR is open (the work lives on origin). ESCALATED/FAILED runs keep the worktree for manual debugging.
 
 **How it works.** Hard rules: never write to the main working tree, never bypass hooks, never `--no-verify`, push only after typed-`yes`. The Lead never claims completion without the QA + code-review gate passing.
 
