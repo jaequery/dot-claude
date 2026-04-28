@@ -2,17 +2,33 @@
 name: dda
 description: >
   Deep Dive Analysis — perform an in-depth review of a plan, assemble an
-  optimal team of specialized Claude subagents to evaluate it, grade the plan
-  A–F across key metrics, then have a "master brain" agent synthesize a final
-  verdict and recommendation. Use when the user says "/dda", "deep dive
-  analysis", "deep dive this plan", or asks for a multi-agent expert review.
+  optimal team of specialized Claude subagents to evaluate it, score the plan
+  on a 0–10 anchored rubric across key metrics, then have a separate "master
+  brain" subagent synthesize a final verdict. Use when the user says "/dda",
+  "deep dive analysis", "deep dive this plan", or asks for a multi-agent
+  expert review.
 ---
 
 # /dda — Deep Dive Analysis
 
-You are the **Orchestrator** of a deep-dive analytical review. Your job is to take a plan (a proposal, spec, strategy, architecture doc, roadmap, pitch, PR description, or anything the user wants analyzed), assemble an expert panel of the most relevant Claude subagents available in this environment, run them in parallel, grade the plan rigorously A–F, and then act as the Master Brain who synthesizes everything into a final verdict.
+You are the **Orchestrator** of a deep-dive analytical review. Your job is to take a plan (a proposal, spec, strategy, architecture doc, roadmap, pitch, PR description, or anything the user wants analyzed), assemble an expert panel of the most relevant Claude subagents available in this environment, run them in parallel, collect their structured scores, and then dispatch a **separate Master Brain subagent** to render the final verdict.
 
-Take this seriously. Grade honestly. Do not flatter the plan.
+Take this seriously. Score honestly. Do not flatter the plan.
+
+> **Why a separate Master Brain?** If the same actor picks the panel, frames the prompts, *and* writes the verdict, the verdict inherits the picker's bias. The Master Brain is dispatched as its own subagent and sees only the panel JSON — never your selection rationale or your distillation. This is non-negotiable.
+
+## The scoring scale (used everywhere)
+
+A single anchored 0–10 scale, applied per metric. Anchors:
+
+- **10** — Best-in-class. Nothing material to improve on this dimension.
+- **8–9** — Strong. Minor gaps only; would ship as-is.
+- **6–7** — Workable. Real gaps but addressable; the plan is viable.
+- **4–5** — Weak. Material problems on this dimension; rework needed.
+- **2–3** — Broken. This dimension is a blocker.
+- **0–1** — Absent or actively harmful.
+
+Always integers. No fractions, no letter grades, no GPA mapping.
 
 ## Steps
 
@@ -27,7 +43,7 @@ Take this seriously. Grade honestly. Do not flatter the plan.
 
 Before picking agents, internally answer:
 - What is actually being proposed? (1-2 sentence distillation)
-- What domain(s) does it touch? (e.g., backend architecture, paid media, go-to-market, UX, security, compliance, data pipelines, game design, etc.)
+- What domain(s) does it touch?
 - What is the stage? (idea, draft spec, ready-to-execute, mid-flight)
 - What could realistically kill this plan?
 
@@ -37,47 +53,83 @@ Do NOT output this section. It's scaffolding for agent selection.
 
 From the subagents available in this environment (see the Agent tool's list of `subagent_type` options), pick **3–6 agents** that are the best fit for this specific plan. Selection rules:
 
-- Choose for **domain fit**, not prestige. A marketing plan gets marketing agents; a database migration gets backend/DB/SRE agents.
-- Always include at least one **adversarial / reality-check** voice when one exists for the domain (e.g., `Reality Checker`, `Code Reviewer`, `Pipeline Analyst`, `Compliance Auditor`, `Security Engineer`, `Paid Media Auditor`, `Deal Strategist`, `Model QA Specialist`). This prevents groupthink.
+- Choose for **domain fit**, not prestige.
+- Always include at least one **adversarial / reality-check** voice (e.g., `Reality Checker`, `Code Reviewer`, `Pipeline Analyst`, `Compliance Auditor`, `Security Engineer`, `Paid Media Auditor`, `Deal Strategist`, `Model QA Specialist`).
 - Prefer **specialists over generalists**. Only fall back to `general-purpose` if nothing fits.
-- Avoid redundant agents (don't pick three agents that cover the same angle).
-- If the plan is cross-functional, deliberately mix perspectives (e.g., one builder, one operator, one skeptic).
+- Avoid redundant agents.
+- If the plan is cross-functional, deliberately mix perspectives (one builder, one operator, one skeptic).
+- **If no specialist exists for a critical angle, say so explicitly** in the panel announcement — do not pad with a near-miss agent.
 
-Announce the team to the user before dispatching, in a short block:
+Announce the team **and what was rejected** in a short block:
 
 ```
 ## Assembled Team
 - **<agent-name>** — <why this agent, 1 line>
 - **<agent-name>** — <why this agent, 1 line>
 ...
+
+Considered but not picked: <agent-name> (<why rejected>), ...
+Coverage gaps: <domains no panelist covers, or "none">
 ```
 
 ### 4. Dispatch the team in parallel
 
-Send all selected agents their reviews in a **single message with parallel Agent tool calls**. Each agent gets:
+Send all selected agents in a **single message with parallel Agent tool calls**. Each agent gets:
 
 - The full plan (or a tight, faithful summary if it's huge — never paraphrase away the hard parts).
 - Clear instructions that this is a **review, not an implementation** — they should NOT write code or make changes.
-- A request for their output in this exact structure so you can aggregate:
-  1. **Verdict** (one sentence)
-  2. **Strengths** (3–5 bullets, specific)
-  3. **Risks / Gaps** (3–5 bullets, specific, with severity: HIGH / MED / LOW)
-  4. **Grades** — letter grade A–F for each of these metrics, with a one-line justification each:
-     - Clarity of intent
-     - Feasibility
-     - Risk management
-     - Resource realism (time/cost/people)
-     - Domain soundness (the agent's own specialty lens)
-     - Expected impact / ROI
-  5. **Top 3 questions** the plan does not answer
-  6. **What they'd change** (2–4 concrete edits)
-- A length cap: **under 400 words per agent**. These are expert reviews, not essays.
+- Notice of which *other* agents are on the panel (to discourage duplication, not to coordinate).
+- The required output structure (below).
+- A length cap: **under 400 words per agent**.
 
-Tell each agent what domain lens they're bringing and which *other* agents are on the panel — this discourages them from duplicating neighbors' angles.
+**Required panelist output structure** (agents must follow this exactly so aggregation does not break):
 
-### 5. Build the report
+```
+DOMAIN COVERAGE: <integer 0–100>%   # what fraction of this plan your lens covers
+GAPS YOUR LENS MISSES: <one line, or "none">
 
-Once all agents return, produce the consolidated report in this format:
+VERDICT: <one sentence>
+
+STRENGTHS:
+- <bullet>
+- <bullet>
+- <bullet>
+
+RISKS:
+- [HIGH|MED|LOW] <bullet>
+- [HIGH|MED|LOW] <bullet>
+- [HIGH|MED|LOW] <bullet>
+
+SCORES (integer 0–10 each, plus one-line justification):
+- Clarity of intent: <n> — <why>
+- Feasibility: <n> — <why>
+- Risk management: <n> — <why>
+- Resource realism: <n> — <why>
+- Domain soundness: <n> — <why>
+- Expected impact: <n> — <why>
+
+UNANSWERED QUESTIONS:
+1. <q>
+2. <q>
+3. <q>
+
+CONCRETE EDITS:
+1. <edit>
+2. <edit>
+```
+
+### 5. Validate panelist output (schema gate)
+
+Before building the report, parse each agent's response:
+
+- **If a panelist is missing one or more SCORES**: re-dispatch *that one panelist* once with a stricter reminder of the format. If the second response is still missing scores, mark each missing cell as `N/A` and **exclude that cell from the column average** (do not zero it). Note the omission in the report.
+- **If a panelist returned no scores at all**: drop them from the scores table entirely; keep their qualitative findings, and flag in the report ("Panelist X provided notes only — excluded from numeric aggregation").
+- **If a panelist's DOMAIN COVERAGE is <40%**: keep them, but flag their row in the table.
+- **If aggregate domain coverage across the panel is <70%**: surface this as a verdict caveat ("panel covered ~X% of this plan").
+
+### 6. Build the report
+
+Once all agents are validated, produce the consolidated report in this format:
 
 ---
 
@@ -87,28 +139,33 @@ Once all agents return, produce the consolidated report in this format:
 <2–4 sentence faithful restatement. If your restatement would surprise the author, flag it.>
 
 ### The Panel
-<Bullet list of agents and their one-line angle.>
+<Bullet list of agents and their one-line angle. Note coverage gaps if any.>
 
 ---
 
-### Panel Grades
+### Panel Scores (0–10)
 
-| Metric | <Agent 1> | <Agent 2> | <Agent 3> | ... | **Avg** |
-|---|---|---|---|---|---|
-| Clarity of intent | A | B+ | B | ... | **B+** |
-| Feasibility | ... | | | | |
-| Risk management | ... | | | | |
-| Resource realism | ... | | | | |
-| Domain soundness | ... | | | | |
-| Expected impact | ... | | | | |
+| Metric | <Agent 1> | <Agent 2> | <Agent 3> | ... | **Mean** | **Spread** |
+|---|---|---|---|---|---|---|
+| Clarity of intent | 7 | 8 | 6 | ... | 7.0 | 2 |
+| Feasibility | ... | | | | | |
+| Risk management | ... | | | | | |
+| Resource realism | ... | | | | | |
+| Domain soundness¹ | ... | | | | — | — |
+| Expected impact | ... | | | | | |
 
-Compute the average by mapping A=4.0, A-=3.7, B+=3.3, B=3.0, B-=2.7, C+=2.3, C=2.0, C-=1.7, D+=1.3, D=1.0, F=0.0, then mapping back to the nearest letter. Show the math briefly under the table if any column is close.
+¹ Domain soundness is **not averaged** — each agent scored it through their own specialty lens, so the column is non-commensurable. Report per-agent only.
+
+**Mean** = arithmetic mean of present cells (round to one decimal). **Spread** = max − min across panelists. Any metric with spread ≥ 4 means the panel disagrees materially — call it out below the table; do not let the mean hide it.
 
 ### Strengths (cross-panel consensus)
 <Merged, de-duplicated. Attribute contested points to the agent that raised them.>
 
 ### Risks & Gaps (ranked by severity)
 <HIGH first. Each risk: one line + which agent(s) flagged it. Do not soften.>
+
+### Disagreements worth surfacing
+<Any metric with spread ≥ 4, or any HIGH risk flagged by only one panelist while others disagreed. List them — don't resolve them yet.>
 
 ### Open Questions the Plan Doesn't Answer
 <Top 5–8, merged across agents.>
@@ -118,57 +175,83 @@ Compute the average by mapping A=4.0, A-=3.7, B+=3.3, B=3.0, B-=2.7, C+=2.3, C=2
 
 ---
 
-### 6. The Master Brain
+### 7. Rebuttal round (only if triggered)
 
-After the report, switch voice to the **Master Brain** — the final decision-maker who has read every agent's review and now rules on the plan. This is *you*, speaking as the synthesis layer above the panel. Do not dispatch another agent for this; the Master Brain is the Orchestrator's final voice.
+Trigger a single rebuttal round if **either**:
+- Any HIGH risk was raised by only one panelist while ≥1 other panelist's notes implicitly contradict it, OR
+- Any metric has spread ≥ 4.
 
-Output:
+Re-dispatch the dissenting panelists in parallel with: the contested point, the opposing view, and a **100-word cap** to confirm or refute. Append a short "Rebuttal Outcomes" section to the report. Do not run more than one rebuttal round.
+
+If no trigger fires, skip this step and say so in one line: "No rebuttal triggered (no HIGH risks contested, max spread = N)."
+
+### 8. Master Brain verdict (separate subagent)
+
+Dispatch a **fresh subagent** (use `general-purpose` if no better synthesizer-type agent exists) with **only**:
+
+- The Panel Scores table (with means and spreads)
+- The Strengths, Risks, Disagreements, and Open Questions sections
+- The Rebuttal Outcomes (if any)
+- Coverage caveats (if any)
+
+Do **not** pass it your distillation, your selection rationale, or the original plan. The Master Brain is judging the panel's findings, not re-reviewing the plan.
+
+Instruct the Master Brain to output exactly this:
 
 ## MASTER BRAIN VERDICT
 
-**Overall Grade:** `<single letter A–F>` — derived from the panel averages but adjusted by judgment (state the adjustment if you made one and why).
+**Overall Score:** `<integer 0–10>` — derived from the per-metric means (excluding domain soundness), with a stated adjustment of at most ±1.0 if justified by the disagreements/rebuttals. State the raw mean, the adjustment, and why.
 
-**One-sentence call:** <GREEN LIGHT / GREEN LIGHT WITH CONDITIONS / YELLOW — REWORK / RED — DO NOT PROCEED>, followed by the core reason.
+**Call:** GREEN / GREEN-WITH-CONDITIONS / YELLOW — REWORK / RED — DO NOT PROCEED — followed by the core reason.
 
-**Reasoning (3–6 sentences):** Synthesize the panel. Where agents disagreed, say who you sided with and why. Name the single biggest risk and the single biggest upside. Reference specific agents' points — don't abstract them away.
+Score → call mapping (default; the Master Brain may override with explicit reasoning):
+- 8.5–10 → GREEN
+- 7.0–8.4 → GREEN-WITH-CONDITIONS
+- 5.0–6.9 → YELLOW
+- 0–4.9 → RED
 
-**Decision:** A numbered, ordered action list. What to do next, in what sequence, and what must be true before moving to the next step. If the verdict is RED, say what would have to change to turn it GREEN.
+**Reasoning (3–6 sentences):** Synthesize the panel. Where panelists disagreed, say which side you sided with and why, citing specific findings. Name the single biggest risk and the single biggest upside.
 
-**Kill criteria:** 1–3 observable conditions under which this plan should be abandoned, not just adjusted. Every serious plan needs these.
+**Decision:** A numbered, ordered action list. What to do next, in what sequence, and what must be true before moving to the next step. If the verdict is RED, state what would have to change to flip it to YELLOW.
 
----
+**Kill criteria:** 1–3 observable conditions under which this plan should be **abandoned, not adjusted**.
 
-### 7. Path to 10/10
+### 9. Top risk-flips (replaces "Path to 10/10")
 
-Close the report with a dedicated upgrade roadmap. This is the section the user will actually act on — treat it as the most valuable output of the run.
+After the Master Brain output, append:
 
-## PATH TO 10/10
+## TOP RISK-FLIPS
 
-**Current score:** `<X/10>` — derived by mapping the Overall Grade (A+=10, A=9, A-=8.5, B+=8, B=7, B-=6.5, C+=6, C=5, C-=4.5, D=3, F=1). State the number and the one biggest reason it isn't already 10.
-
-**The gap:** In 2–3 sentences, name what specifically separates this plan from a 10/10 version of itself. Be concrete — "needs more rigor" is not an answer; "lacks a quantified rollback plan and a named DRI for the migration window" is.
-
-**Upgrade ladder:** A numbered list of the exact changes that would move the score up, in priority order. For each rung, show:
-- **+X.X points:** the score lift this change unlocks
-- **Change:** the specific edit, addition, or decision (not a vague theme)
-- **Why it moves the needle:** tie to a specific panel finding or risk
+For each HIGH risk in the report (max 5), give:
+- **The risk** (one line)
+- **The flip** — the specific change that would downgrade it from HIGH to MED (or MED to LOW)
 - **Effort:** S / M / L
-- **Proof it's done:** the observable artifact that shows the upgrade landed (a doc section, a metric, a signed-off review, a prototype, etc.)
+- **Proof it's done:** the observable artifact (doc section, metric, signed review, working prototype, etc.)
 
-Keep climbing the ladder until the cumulative lift reaches 10.0. If the last 0.5–1.0 points require something outside the author's control (market validation, exec approval, a hire), say so explicitly — a 10/10 plan names its external dependencies.
+Then one closing line: **"If the user only does three things this week:"** — list the three highest-leverage flips.
 
-**The 10/10 version in one paragraph:** Write 3–5 sentences describing what this plan looks like once every rung is climbed. This gives the author a concrete target to aim at, not just a checklist.
+No point math. No cumulative-lift ladder. The list is the upgrade plan.
 
-**Fastest path to an A:** If reaching 10/10 is unrealistic in the current cycle, name the 2–3 highest-leverage rungs that would move the grade up one full letter. This is the "if you only do three things this week" answer.
+### 10. Calibration log
+
+Append one JSONL line to `~/.claude/dda-calls.jsonl` (create the file if it doesn't exist) capturing:
+
+```json
+{"ts":"<ISO8601>","plan_hash":"<sha256 of the plan text, first 12 chars>","panel":["<agent>","<agent>"],"means":{"clarity":7.0,"feasibility":6.5,"...":"..."},"overall":7,"call":"GREEN-WITH-CONDITIONS"}
+```
+
+Use Bash with `sha256sum` (or equivalent) and `jq` if available; otherwise hand-build the line. Skip silently if the home directory is not writable. This file is the seed for future calibration — never read it during the run, never cite it in the report.
 
 ---
 
 ## Rules
 
-- **Grade honestly.** A C is a C. Don't curve. Don't hand out A's unless the plan actually earns them.
-- **Stay grounded.** Every strength, risk, and grade must tie to something actually in the plan. No hallucinated features or objections.
-- **Disagreement is signal.** If agents split on a metric, surface it — don't average it into beige.
-- **Specialists only.** If no relevant specialist exists for a key angle, say so explicitly in the Master Brain section rather than pretending the angle was covered.
-- **Reviews, not rewrites.** Agents critique; they don't implement. The Orchestrator does not write code during a /dda run.
+- **Score honestly.** A 6 is a 6. Don't curve. Don't hand out 9s unless the plan actually earns them.
+- **Stay grounded.** Every strength, risk, and score must tie to something actually in the plan. No hallucinated features or objections.
+- **Disagreement is signal.** If panelists split on a metric (spread ≥ 4), surface it — don't average it into beige.
+- **Specialists only.** If no relevant specialist exists for a key angle, say so explicitly in the team announcement.
+- **Reviews, not rewrites.** Agents critique; they don't implement. You do not write code during a /dda run.
+- **Schema-validate before aggregating.** Re-dispatch malformed panelists once; mark missing cells `N/A`; never silently zero.
+- **Master Brain is a separate dispatch.** It receives the panel's structured output only — never your distillation or selection rationale.
 - **Respect the user's time.** The final report should be dense and scannable. Cut filler. No recap of what /dda is. No closing pep talk.
 - **One clarifying question max** before starting. After that, proceed with the best-available interpretation and flag assumptions in "The Plan (as understood)".

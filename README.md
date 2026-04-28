@@ -69,7 +69,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
-- [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel grades a plan A–F, Master Brain issues a verdict.
+- [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
 - [`/shark-tank`](#shark-tank) — Evaluate the current project as a Shark Tank episode.
 - [`/git-audit`](#git-audit) — 13-way repo health and team-dynamics audit.
@@ -168,15 +168,15 @@ A sequenced, zero-to-one operating system:
 
 ### `/dda` — Deep Dive Analysis
 
-**What it does.** Auto-assembles a 3–6 agent expert panel from the roster, grades your plan A–F across six metrics, then a "Master Brain" synthesis layer issues a GREEN / YELLOW / RED verdict with kill criteria.
+**What it does.** Auto-assembles a 3–6 agent expert panel from the roster, scores your plan on a 0–10 anchored rubric across six metrics, then a **separate Master Brain subagent** (dispatched fresh, sees only the panel output) issues a GREEN / YELLOW / RED verdict with kill criteria.
 
 **When to use.** You have a plan, spec, strategy, or pitch and want advisory-board-quality review in one command.
 
 **How to invoke.** `/dda <plan>`, or paste a plan / pass a file path / point at prior discussion, then trigger with *"deep dive analysis"*, *"deep dive this plan"*, *"multi-agent expert review"*. One clarifying question allowed if ambiguous.
 
-**What you get.** Panel roster → grade matrix (6 metrics × agents) → consensus strengths, risks, questions, recommended changes → **Master Brain Verdict** (GREEN / YELLOW / RED) → **Path to 10/10** upgrade ladder with scored rungs.
+**What you get.** Panel roster (with rejected candidates and coverage gaps) → score matrix (6 metrics × agents, with means and spreads) → consensus strengths, risks, surfaced disagreements, open questions, must/should/nice edits → optional rebuttal round when panelists materially disagree → **Master Brain Verdict** (GREEN / YELLOW / RED) → **Top Risk-Flips** (HIGH→MED with effort + proof). Each run appends to `~/.claude/dda-calls.jsonl` for future calibration.
 
-**How it works.** Orchestrator picks domain-fit subagents and *always* includes an adversarial voice (Reality Checker, Evidence Collector, Code Reviewer, etc.) to prevent groupthink. Panel dispatches in parallel with a capped 400-word output contract; grades averaged on an A=4.0 scale.
+**How it works.** Orchestrator picks domain-fit subagents and *always* includes an adversarial voice (Reality Checker, Code Reviewer, Compliance Auditor, etc.) to prevent groupthink. Panel dispatches in parallel with a strict structured output contract that's schema-validated before aggregation (malformed panelists are re-dispatched once, missing cells marked `N/A` not zero). The Master Brain runs as its own subagent dispatch and never sees the Orchestrator's distillation or selection rationale — separating jury from judge.
 
 **Example.**
 
