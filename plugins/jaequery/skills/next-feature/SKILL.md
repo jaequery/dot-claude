@@ -13,7 +13,7 @@ description: >
 
 You are running a tournament to decide the single most useful feature to add to the current project. Multiple rival teams of specialist subagents each propose a *different* candidate feature with a full plan; you judge them head-to-head and ship one winner.
 
-Operate under the full tournament playbook in the `/orchestrate` skill — multi-team, 3 improvement rounds + Finals, independent eval gate. Field rival teams, run them in parallel and isolated through preliminary rounds, pick a winner on declared criteria against the Finals submissions, and do not produce Frankenstein blends. The rest of this file is the feature-selection specialization on top of that tournament structure.
+Run a tournament: field 2–4 rival teams of specialist subagents, run them in parallel and isolated through 3 improvement rounds, then a Finals where teams see sanitized rival summaries and go all-out. Pick a winner head-to-head on declared criteria against the Finals submissions. Do not produce Frankenstein blends. The rest of this file is the feature-selection specialization on top of that tournament structure.
 
 Take this seriously. Feature proposals must tie to what actually exists in this project — not hallucinated framing.
 
