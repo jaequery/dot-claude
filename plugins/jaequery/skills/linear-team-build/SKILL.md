@@ -34,51 +34,66 @@ If invoked with no flags, ask ONE question: "Process up to 10 tickets,
 sequentially, base = main, default clean-code bar — proceed?" Default
 to those values on a plain "yes".
 
+## Linear interface — `@schpet/linear-cli`
+
+**All Linear interactions in this skill go through the `linear` CLI
+([`@schpet/linear-cli`](https://github.com/schpet/linear-cli)), not
+raw GraphQL.** The CLI handles auth via stored workspace credentials
+(`linear auth login`), so `LINEAR_API_KEY` is not required directly.
+
+Canonical commands used below:
+- `linear auth token` — verifies a credential is configured.
+- `linear issue query --state unstarted --json [--team K] [--assignee U] [--limit N]`
+  — fetch issues. Filter to "Todo" by `state.name` in the JSON output.
+- `linear issue update <ID> --state "<name>"` — transition workflow state
+  by name (e.g. `"In Progress"`, `"In Review"`, `"Todo"`).
+- `linear issue comment add <ID> --body-file <path>` — post a comment
+  (use `--body-file` for any multi-line markdown).
+- `linear issue view <ID> --json` — fetch a single issue with full
+  fields (description, attachments, labels) when needed.
+
+Only fall back to `linear api '<graphql>'` (the CLI's raw-API escape
+hatch) if a needed field is not exposed by a structured subcommand.
+**Never** call `curl https://api.linear.app/graphql` directly.
+
 ## 1. Preflight
 
-1. **Linear auth.** Require `LINEAR_API_KEY` in the environment.
-   - Test: `curl -s -X POST https://api.linear.app/graphql -H
-     "Authorization: $LINEAR_API_KEY" -H "Content-Type: application/json"
-     -d '{"query":"{ viewer { id name email } }"}'`
-   - On failure, stop and tell the user to set `LINEAR_API_KEY`
-     (Settings → API → Personal API keys).
-2. **Repo state.** `git status --porcelain` must be empty, or surfaced
+1. **`linear` CLI available.** `command -v linear` must succeed.
+   - On failure, stop and tell the user to install it:
+     `npm i -g @schpet/linear-cli` (or `brew install schpet/tap/linear-cli`).
+2. **Linear auth.** `linear auth token` must print a token.
+   - On failure, tell the user to run `linear auth login` and pick a
+     workspace, then re-run the skill.
+3. **Repo state.** `git status --porcelain` must be empty, or surfaced
    and confirmed by the user.
-3. **`gh` available.** `gh auth status` must succeed — `/team-build`
+4. **`gh` available.** `gh auth status` must succeed — `/team-build`
    needs it for PR creation.
-4. **`/team-build` reachable.** This skill invokes it via the Skill
+5. **`/team-build` reachable.** This skill invokes it via the Skill
    tool; if not listed as available, abort.
 
 ## 2. Fetch the Todo queue
 
 Linear's "Todo" is a `WorkflowState` of type `unstarted` named `Todo`
-(case-insensitive). Match on type first, prefer the one literally named
-"Todo" if multiple exist.
+(case-insensitive). Use the CLI's structured query, then post-filter
+the JSON output by state name.
 
-GraphQL query (drop unset filters; resolve `--assignee me` via `viewer`
-first):
-
-```graphql
-query Todos($teamKey: String, $assigneeId: String, $first: Int!) {
-  issues(
-    first: $first
-    filter: {
-      state: { type: { eq: "unstarted" }, name: { eqIgnoreCase: "Todo" } }
-      team: { key: { eq: $teamKey } }
-      assignee: { id: { eq: $assigneeId } }
-    }
-    orderBy: updatedAt
-  ) {
-    nodes {
-      id identifier title description url priority
-      assignee { name email }
-      team { key name }
-      labels { nodes { name } }
-      attachments { nodes { sourceType url } }
-    }
-  }
-}
+```bash
+linear issue query \
+  --state unstarted \
+  --json \
+  --limit "${LIMIT:-10}" \
+  ${TEAM:+--team "$TEAM"} \
+  ${ASSIGNEE:+--assignee "$ASSIGNEE"}
 ```
+
+For `--assignee me`, pass `self` (the CLI resolves it). Then in the
+JSON, keep only nodes whose `state.name` matches `Todo`
+(case-insensitive); if a team has no exact `Todo` state, fall back to
+all `unstarted` results for that team and note the substitution in
+the printed table.
+
+If a returned issue is missing `description`, `attachments`, or
+`labels`, hydrate it with `linear issue view <ID> --json`.
 
 Sort: `priority` ascending (1=urgent first; 0=no-priority last), then
 `updatedAt` ascending. Apply `--limit`. Print a numbered table:
@@ -120,9 +135,10 @@ git show-ref --verify --quiet "refs/heads/$RESOLVED" \
 ```
 
 If neither, **STOP this ticket** (do not silently fall back to `main`):
-- Comment on the Linear ticket: "team-build skipped: target branch
-  `$RESOLVED` does not exist locally or on origin."
-- Move the ticket back to **Todo**.
+- Comment on the Linear ticket via
+  `linear issue comment add $IDENT --body "team-build skipped: target branch \`$RESOLVED\` does not exist locally or on origin."`
+- Move the ticket back to **Todo** via
+  `linear issue update $IDENT --state Todo`.
 - Record verdict `SKIPPED` in the results table and continue to the
   next ticket.
 
@@ -160,9 +176,14 @@ Slug for the worktree: `$IDENT` lowercased (e.g. `eng-123`).
 
 ### 3b. Move the ticket to "In Progress"
 
-Before launching, transition the ticket via Linear's `issueUpdate`. Find
-the state ID by querying `team.states` for type `started` (prefer name
-"In Progress"). On failure, log a warning and continue.
+Before launching, transition the ticket:
+```bash
+linear issue update "$IDENT" --state "In Progress"
+```
+The CLI matches state name on the issue's team. If the team has no
+state named "In Progress" but has another `started`-type state, retry
+with that name. On any failure, log a warning and continue —
+do not block the build on Linear state.
 
 ### 3c. Invoke `/team-build` — ONE invocation per ticket
 
@@ -206,14 +227,27 @@ worktree path, verdict, rounds run.
 
 ### 3e. Update Linear
 
-- **APPROVED + PR opened:** comment the PR URL on the ticket; move to
-  **"In Review"** (state type `started` named "In Review") if it
-  exists, else leave in "In Progress".
-- **ESCALATED or FAILED:** comment the blocker summary, worktree path,
-  and remediation notes; move back to **Todo**. Never mark done.
+Use the CLI for both the comment and the state transition. Always
+write the comment body to a temp file and pass `--body-file` so
+multi-line markdown survives shell quoting.
 
-Mutations: `commentCreate { issueId, body }` and
-`issueUpdate { id, input: { stateId } }`.
+- **APPROVED + PR opened:**
+  ```bash
+  linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
+  linear issue update  "$IDENT" --state "In Review"   # falls back to leaving in "In Progress" if not present
+  ```
+  Comment body: the PR URL plus a one-line summary.
+- **ESCALATED or FAILED:**
+  ```bash
+  linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
+  linear issue update  "$IDENT" --state "Todo"
+  ```
+  Comment body: blocker summary, worktree path, and remediation notes.
+  Never mark done.
+
+If `linear issue update --state "In Review"` fails because the team
+lacks that state, leave the ticket in "In Progress" and note it in
+the results table.
 
 ### 3f. Decide whether to continue
 
@@ -268,7 +302,11 @@ Default: keep.
   Team Lead's §6 code-review gate. Re-roll if violated.
 - Always update Linear (comment + state) after each ticket. Never
   leave a ticket stranded in "In Progress" on failure.
-- If `LINEAR_API_KEY` is missing/invalid, abort before touching git.
-  If `gh` isn't authed, abort before touching Linear.
+- **Use the `linear` CLI (`@schpet/linear-cli`) for every Linear
+  read/write.** No raw `curl` to the Linear GraphQL endpoint, no
+  bespoke API key plumbing. Fall back to `linear api` only when no
+  structured subcommand exposes a needed field.
+- If `linear auth token` fails, abort before touching git. If `gh`
+  isn't authed, abort before touching Linear.
 - Don't open more than 10 PRs per run unless the user explicitly
   raised `--limit` past 10.

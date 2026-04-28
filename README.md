@@ -128,11 +128,11 @@ A sequenced, zero-to-one operating system:
 
 **When to use.** Burning down a triaged Linear backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle Linear state transitions and PR creation.
 
-**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1, cap 5), `--dry-run`. Requires `LINEAR_API_KEY` and authed `gh`.
+**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1, cap 5), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
 
 **What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → move to "In Progress" → invoke `/team-build` → verify exactly one new PR appeared → comment PR URL on Linear → move to "In Review") → final summary table.
 
-**How it works.** Per-ticket target branch resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce.
+**How it works.** All Linear reads/writes go through the `linear` CLI — `linear issue query --json` to fetch the queue, `linear issue update --state` for transitions, `linear issue comment add --body-file` for comments. No raw GraphQL `curl`. Per-ticket target branch resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce.
 
 **Example.**
 
