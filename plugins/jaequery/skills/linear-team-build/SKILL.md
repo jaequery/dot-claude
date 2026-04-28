@@ -26,14 +26,16 @@ Every build must meet the clean-code bar in §3a.
 - `--assignee <me|email|userId>` — filter to one assignee. Default: any.
 - `--limit <n>` — cap how many tickets to process this run. Default: 10.
 - `--target <branch>` — base branch for PRs. Default: `main`.
-- `--parallel <n>` — process N tickets concurrently. Default: 3.
-  Cap at 5; warn if `--parallel > 3`. Pass `--parallel 1` to force
-  sequential.
+- `--parallel <n>` — process N tickets concurrently. **Default: all of
+  them** (i.e. `--parallel = number of selected tickets`). Pass an
+  explicit number to throttle; pass `--parallel 1` to force sequential.
+  Warn if effective concurrency exceeds 5 (shared `gh`/Linear rate
+  limits) but do not cap.
 - `--dry-run` — list tickets that would be processed and stop.
 
 If invoked with no flags, ask ONE question: "Process up to 10 tickets,
-3 in parallel, base = main, default clean-code bar — proceed?" Default
-to those values on a plain "yes".
+all in parallel, base = main, default clean-code bar — proceed?"
+Default to those values on a plain "yes".
 
 ## Linear interface — `@schpet/linear-cli`
 
@@ -279,12 +281,13 @@ the results table.
 
 ## 4. Parallel mode
 
-Default `--parallel 3`. N ticket subroutines run concurrently — each
-`/team-build` produces its own worktree (`team-build/...`), so they
-don't collide. Cap at N=5 regardless of user request. Warn: shared
-`gh` auth may hit GitHub rate limits with many quick PRs. Pass
-`--parallel 1` to force sequential when debugging or when ticket
-ordering matters.
+Default: **all selected tickets run concurrently** (effective
+`--parallel = N_selected`). Each `/team-build` produces its own
+worktree (`team-build/...`), so they don't collide. Pass `--parallel
+<n>` to throttle; pass `--parallel 1` to force sequential for
+debugging or ordering. If effective concurrency exceeds 5, warn the
+user about shared `gh`/Linear rate limits but do not cap — the user
+asked for it.
 
 ## 5. Final summary
 
