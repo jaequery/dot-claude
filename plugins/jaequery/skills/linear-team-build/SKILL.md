@@ -245,7 +245,7 @@ Processed: N tickets
 | ENG-130  | ESCALATED | (no PR — see worktree)          | 3      |
 
 Worktrees still on disk:
-- /path/to/repo.tb-eng-130-...  (ENG-130, escalated)
+- /path/to/repo.team-build-eng-130-...  (ENG-130, escalated)
 
 Linear updates posted: <count>
 ```
