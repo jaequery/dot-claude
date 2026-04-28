@@ -38,8 +38,58 @@ The user invokes `/team-build <task description>`. They may also pass:
 - If no target branch is provided, the worktree + branch is left in place
   and the user is offered the standard cleanup menu (see §6).
 
-If the task is ambiguous or missing, ask ONE clarifying question before
-proceeding. Don't ask more than one.
+## 0.5 Discovery — ask everything you need, once, up front
+
+Before touching git or assembling a team, the Team Lead writes a
+**fully thought-out plan**. That plan is only as good as the brief.
+Treat the user's `<task description>` as the *seed*, not the spec.
+You are the senior engineer they hired; ambiguity is your problem to
+surface, not theirs to anticipate.
+
+Run a discovery pass:
+
+1. **Read the room first.** Skim the repo (`README`, `CLAUDE.md`,
+   manifest, recent `git log`) and the task description. Generate the
+   answers you can derive yourself — never ask the user something the
+   codebase already tells you.
+2. **List every open question** that would change the plan, the
+   roster, the diff, or the verification. Group them by category:
+   - **Scope & success** — what's in, what's out, how do we know it
+     works (acceptance criteria, definition of done).
+   - **Users & flows** — who triggers this, what surfaces are
+     affected (web, mobile, API, CLI, admin), what edge cases matter.
+   - **Data & state** — schemas/migrations, seed data, multi-tenant
+     scoping, backwards compatibility for existing rows.
+   - **Integrations & secrets** — third parties, webhooks, env vars,
+     auth model, rate limits, sandbox vs prod credentials.
+   - **Non-functional** — perf budgets, accessibility level,
+     observability (logs/metrics/traces), security/PII handling.
+   - **Delivery** — target branch, feature flag vs direct ship,
+     migration timing, who reviews, deadline.
+   - **Constraints & taste** — must-use libs, must-avoid libs, code
+     style, design system, UX bar.
+3. **Ask them all in a single message** via `AskUserQuestion`. One
+   batch, multi-select where useful, with a sane default offered for
+   each so the user can speed-run by accepting defaults. Cap at ~6
+   questions per batch — if you have more, drop the ones whose
+   answer wouldn't actually change the plan. If after the codebase
+   pass you genuinely have **zero** load-bearing unknowns, skip the
+   ask and proceed.
+4. **Echo back the resolved spec** before §1: a short bulleted
+   "Brief as understood" the user can correct in one line. Then
+   proceed without further confirmation.
+
+Skip the discovery pass when:
+- The skill was invoked by another skill (e.g. `/linear-team-build`)
+  whose prompt already contains a fully-formed brief — the upstream
+  skill owns scoping. Detect this by the prompt explicitly stating
+  "[Linear …]" / "do not ask clarifying questions" / supplying
+  `--working-branch`.
+- The user's prompt itself is exhaustive (acceptance criteria, target
+  branch, constraints all present). When in doubt, ask.
+
+Never ask trickle questions across multiple turns — it burns the
+user's patience and fragments the plan. One batch, then build.
 
 ## 1. Create the isolated worktree
 
@@ -197,53 +247,136 @@ Add to the plan announcement:
 
 ## 2. Team Lead's plan (internal, then announced)
 
-Before dispatching anyone, the Team Lead produces a written plan:
+The plan is the contract for everything downstream. A vague plan
+produces a vague diff. Before dispatching anyone, the Team Lead
+produces a **fully thought-out, explicit, falsifiable** plan grounded
+in §0.5 discovery answers and what you read in the codebase.
 
-1. **Distill the task** in 1–2 sentences. What does "done" look like?
-2. **Identify the domains** the work touches (frontend, backend, infra,
-   data, auth, payments, design system, etc.).
-3. **Identify the non-negotiables** for this build:
-   - Most recent stable versions of frameworks and libraries.
-   - Industry-standard best practices for the domain.
-   - Clean, modern, minimalist design and UX (if any UI is involved).
-   - Security: no obvious vulnerabilities; secrets handled correctly;
-     input validated; authn/authz correct; dependencies vetted.
-   - Tests where they make sense; no dead code; no TODOs left in.
-4. **Decompose into agent assignments**. Pick **2–10** specialist subagents
-   from the environment's available `subagent_type` list. Selection rules:
-   - Domain fit over prestige. UI work → UI/UX agents. Backend → backend
+Build the plan in this order:
+
+1. **Goal & success criteria.** One sentence on what's being built,
+   then 3–7 *falsifiable* acceptance criteria — observable behaviors
+   a tester could check ("user can submit form X with email Y and
+   sees confirmation Z within 2s"), not vibes ("works well").
+2. **Out of scope.** Explicit list of things this build will NOT do.
+   This is the most-skipped section and the one that prevents drive-by
+   refactors and scope creep. If you can't name 2–3 things you're
+   deliberately not doing, you haven't bounded the work.
+3. **Domains touched.** Frontend / backend / infra / data / auth /
+   payments / design system / etc. Used to size the team in step 7.
+4. **Architecture sketch.** A short outline naming the *new* and
+   *changed* artifacts:
+   - Files to create (path → purpose, one line each).
+   - Files to modify (path → what changes).
+   - Database changes (new tables/columns/indexes/constraints,
+     migrations needed yes/no).
+   - New routes / endpoints / events / jobs / cron / queues.
+   - New env vars / config / secrets.
+   - External services touched (with auth model + sandbox vs prod).
+   No code yet — this is the map. If you can't draw it, you don't
+   understand the task; loop back to §0.5.
+5. **Risks & unknowns.** 2–5 bullets naming the ways this could go
+   sideways (perf hot path, race condition, migration on a hot
+   table, breaking change, third-party flakiness) and the mitigation
+   for each. "No known risks" is almost always wrong; push harder.
+6. **Verification plan.** How §5 (QA gate) will *prove* each
+   acceptance criterion. Map each criterion → the artifact that
+   proves it (unit test, integration test, screenshot, transcript,
+   manual smoke). The QA agent reads this map; missing entries =
+   missing proof = blocked ship.
+7. **Roster & orders.** Pick **2–10** specialist subagents from the
+   environment's `subagent_type` list. Selection rules:
+   - Domain fit over prestige. UI → UI/UX agents. Backend → backend
      architect / database / API. Mobile → mobile builder. Etc.
    - Always include at least one builder per major domain in scope.
-   - Always include a **`Security Engineer`** (or closest available
-     security/audit agent) for the security pass in §4.
+   - Always include a **`Security Engineer`** (or closest security
+     agent) for the §4 security pass.
    - Always include a **`Code Reviewer`** AND a QA-style agent
      (`Reality Checker`, `Evidence Collector`, `Test Results Analyzer`,
-     or `API Tester` — pick what fits) for the §5 gate.
+     or `API Tester`) for the §5 gate.
    - If the build has any UI surface, include a **`UI Designer`** or
      **`UX Architect`** to enforce the clean/minimalist bar.
-   - Prefer specialists over `general-purpose`. Only fall back to
-     `general-purpose` if no specialist fits.
+   - Prefer specialists over `general-purpose`. Each agent gets a
+     **scoped order** (1–2 sentences) tied to the artifacts in step 4
+     — never "make it work", always "create `X` that does `Y`,
+     wired into `Z`".
+8. **Sequencing.** Identify what must run *before* what (data layer
+   before UI, auth before authed endpoints, etc.) and which agents
+   can run in parallel. The §3 build round uses this directly.
+9. **Non-negotiables.** Latest stable framework versions, project
+   conventions reused (don't reinvent existing helpers — name the
+   ones you'll lean on), no dead code / TODOs / commented-out code,
+   secrets via env, validation at boundaries, accessibility AA where
+   UI exists.
 
-Announce the plan to the user before dispatching:
+Announce the plan to the user before dispatching — full, not
+abridged. The user's confirmation here is implicit (the skill is
+high-velocity), but this is their last chance to redirect, so make it
+legible:
 
 ```
 ## Team Lead's plan
+
 **Goal:** <one line>
+**Success criteria (falsifiable):**
+1. <criterion>
+2. <criterion>
+…
+
+**Out of scope:**
+- <thing not being done>
+- <thing not being done>
+
 **Worktree:** $WT_PATH on $BRANCH (base: $BASE_BRANCH @ $BASE_SHA)
 **Target branch:** $TARGET_BRANCH (or "none — leaving worktree for review")
+**Per-worktree DB:** <from §1.5>
 
-## Assembled team
-- **<agent>** — <specific order, 1 line>
-- **<agent>** — <specific order, 1 line>
-...
+## Architecture sketch
+**New files**
+- `path/to/file` — <one-line purpose>
+
+**Modified files**
+- `path/to/file` — <what changes>
+
+**Data**
+- <migration / schema change / "no DB changes">
+
+**Surfaces**
+- Routes: <list> · Jobs: <list> · Events: <list> · Env: <list>
+
+**External services**
+- <name> (auth: <model>, env: <sandbox|prod>)
+
+## Risks & mitigations
+- <risk> → <mitigation>
+- <risk> → <mitigation>
+
+## Verification map
+| # | Criterion | Proof artifact |
+|---|-----------|----------------|
+| 1 | <crit>    | <test / shot / transcript> |
+
+## Assembled team & orders
+- **<agent>** — <scoped order tied to specific files/artifacts>
+- **<agent>** — <scoped order tied to specific files/artifacts>
+
+## Sequencing
+1. <agent(s) running first> — <why first>
+2. <agent(s) next, in parallel> — <why parallel>
+…
 
 ## Non-negotiables
 - Latest stable versions of <X, Y>
-- <domain best practice>
-- Clean, minimalist UI / accessible
-- Security audited (see §4)
-- Final QA gate (see §5) must pass before ship
+- Reuse existing helpers: <names>
+- Clean, minimalist UI / accessible (where applicable)
+- Security audited (§4)
+- QA gate (§5) verifies every success criterion above before ship
 ```
+
+If any section above would be empty or hand-wavy ("TBD", "as
+needed"), STOP and either re-derive it from the codebase or add the
+missing question to a §0.5 follow-up batch. Do not dispatch on a
+plan with holes — those holes become bugs.
 
 ## 3. Build round (parallel where possible)
 
