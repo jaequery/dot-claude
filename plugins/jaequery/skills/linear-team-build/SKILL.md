@@ -137,26 +137,69 @@ state ID by querying `team.states` for type `started` (prefer name
 "In Progress"). On failure, log a warning and continue — the build
 should still proceed.
 
-### 3c. Invoke `/team-build`
+### 3c. Invoke `/team-build` — ONE invocation per ticket
 
-Call it via the Skill tool with `args` set to:
+**This is the most-violated rule of this skill. Read it carefully.**
+
+For each ticket you make **exactly one separate Skill-tool call** to
+`/team-build`. Never batch multiple tickets into a single invocation.
+Never pass a list of tickets. Never let one team-build's worktree be
+"reused" for the next ticket. The whole point of this skill is one
+worktree → one branch → one PR per ticket.
+
+Before each invocation, snapshot the latest PR list so you can verify
+a new PR appears after team-build returns:
 
 ```
---branch $TARGET <task description from 3a>
+PRS_BEFORE=$(gh pr list --state open --json number,headRefName,url \
+  --limit 200)
 ```
 
-`/team-build` runs end-to-end inside this turn: worktree, plan, team
-spawn, build/security/QA loop, push, PR. It returns when the work is
-APPROVED-and-shipped, NEEDS-USER (escalation), or FAILED.
+Call `/team-build` via the Skill tool with `args`:
+
+```
+--branch $TARGET
+
+[Linear $IDENT] $TITLE
+Source: $URL
+Priority: $PRIORITY  Assignee: $ASSIGNEE  Labels: $LABELS
+
+$DESCRIPTION
+```
+
+(One arg blob — the `--branch` flag, then a blank line, then the task
+body from §3a.)
+
+`/team-build` runs end-to-end in that single turn: worktree, plan,
+team spawn, build/security/QA loop, push, PR. When it returns it must
+have produced a **new** branch matching `tb/<ticket-slug>-*` and a
+**new** PR URL. It returns when the work is APPROVED-and-shipped,
+NEEDS-USER (escalation), or FAILED.
+
+After it returns, **immediately tear down its team and worktree
+context before starting the next ticket** so nothing leaks across:
+- Confirm `gh pr list` now shows one additional open PR vs.
+  `PRS_BEFORE` whose head ref is `tb/<this-ticket-slug>-*`. If not,
+  STOP the loop — something is wrong (likely team-build was reused or
+  the push failed silently). Do not proceed to the next ticket.
+- Confirm the team for this ticket (`tb-<ticket-slug>-*`) is gone
+  (`ls ~/.claude/teams/` — should not list it). If still present,
+  shut it down before continuing.
 
 ### 3d. Capture the outcome
 
 From team-build's final report, record:
-- PR URL (parse from `gh pr create` output)
-- Branch name
+- PR URL (parse from `gh pr create` output AND verify it's the new
+  entry from the §3c diff)
+- PR number
+- Branch name (must start with `tb/` and be unique across the run)
 - Worktree path
 - Verdict (APPROVED / ESCALATED / FAILED)
 - Rounds run
+
+Cross-check uniqueness against previous tickets in this run: branch
+name and PR number must not match any earlier ticket's. If they do,
+the loop has malfunctioned — STOP and report.
 
 ### 3e. Update Linear
 
@@ -221,8 +264,18 @@ Default: keep them (they're cheap and the user may want to inspect).
 
 ## Hard rules
 
-- **One PR per ticket.** Never bundle multiple Linear tickets into one
-  PR or one branch.
+- **One PR per ticket. ONE Skill-tool call to `/team-build` per
+  ticket.** Never bundle multiple Linear tickets into one PR, one
+  branch, one worktree, or one team-build invocation. If you find
+  yourself writing a single team-build prompt that mentions two
+  ticket IDs, stop — you're doing it wrong.
+- **Verify isolation between tickets.** After each `/team-build`
+  returns, snapshot `gh pr list` and confirm exactly one new PR
+  appeared whose head ref starts with `tb/<this-ticket-slug>-`. If
+  zero or more than one new PR appeared, STOP the loop.
+- **No branch reuse.** Branch name and PR number must be unique
+  across the run. Cross-check against the running results table
+  before starting the next ticket.
 - Each ticket gets its own `/team-build` invocation, its own worktree,
   its own team, its own branch (`tb/<slug>-<ts>`), its own PR against
   `$TARGET`.
