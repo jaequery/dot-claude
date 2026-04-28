@@ -152,7 +152,7 @@ A sequenced, zero-to-one operating system:
 
 **When to use.** Burning down a triaged Linear backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle Linear state transitions and PR creation.
 
-**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1, cap 5), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
+**How to invoke.** `/linear-team-build [flags]`. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 3, cap 5; pass 1 to force sequential), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
 
 **What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → move to "In Progress" → invoke `/team-build` → verify exactly one new PR appeared → comment PR URL on Linear → move to "In Review") → final summary table.
 
