@@ -67,6 +67,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 ### Decision & review
 
 - [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
+- [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
@@ -119,6 +120,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Spins up a worktree, fields a Team Lead with a backend, frontend, security, and code-review squad, builds across them in parallel, audits the diff, and opens a PR against `main` only after the QA gate passes.*
+
+---
+
+### `/team-design`
+
+**What it does.** A world-class Design Lead generates **2–10 divergent design variants** of the same task in parallel — each on its own isolated git worktree and branch — so the human can preview and pick the direction. Variants are required to diverge on the axes that actually differentiate work (typography, motion, color, density, voice); cousin-variants are critiqued back. Each variant gets a per-thesis team (UI Designer, Frontend Developer, Accessibility Auditor, Whimsy Injector when warranted, etc.) dispatched in parallel, then the Lead reviews every variant against its own thesis and either passes, sends it back for one scoped redo, or kills it. Final lineup ships as `team-design/<slug>-<variant>` branches with screenshots committed inline.
+
+**When to use.** Greenfield design work where the brief is open enough to support real divergence: landing pages, brand directions, dashboard skins, marketing-site rebuilds, onboarding flows, hero treatments. Not for tweaking an existing component to spec — that's a single-track `/team-build`.
+
+**How to invoke.** `/team-design <task description> [flags]`. Flags: `--variants <N>` (2–10, default 4), `--target-branch <branch>` (PR base if you ship), `--branch-prefix <prefix>` (default `team-design`), `--reference <url|path>` (repeatable — Figma file, Dribbble link, competitor URL).
+
+**What you get.** Lead's brief (named directions, not "variant 1/2/3") → N parallel worktrees at `../<repo>.team-design-<slug>-<variant>-<ts>` on branches `team-design/<slug>-<variant>` → per-variant team dispatched in parallel → Playwright screenshots (desktop + mobile + interactive state) committed to each variant's branch → Lead's critique scoring each variant on thesis fidelity / craft / differentiation / verdict (PASS/REDO/KILL) → picker UI with `(p)review`, `(d)iff`, `(o)pen`, `(s)hip`, `(k)ill`, `(c)ompare`, `(a)dopt`, `(q)uit` actions. With `--target-branch`, `s all` ships every PASS variant as a separate PR.
+
+**How it works.** The Lead is opinionated on purpose — Awwwards/FWA-tier bar, weekly trend literacy, refuses to flatter the team. Loop cap: 2 redos per variant before auto-KILL. Hard rules: variants must diverge (cousin-variants are a Lead failure, not a feature); one worktree per variant with no cross-variant writes; PASS verdict requires committed screenshots — words don't ship design; never auto-replace a KILLED variant mid-flight (kills are kept visible to the user); never `--no-verify`, never bypass push gates. Inherits `/team-build`'s §1.5 per-worktree DB branching when a docker-compose DB service is detected, so seeded variants don't trample each other.
+
+**Example.**
+
+```
+/team-design redesign the landing page for a B2B AI infra startup --variants 5 --reference https://linear.app
+```
+
+*Lead announces 5 named directions (e.g. `editorial-serif`, `swiss-grid`, `kinetic-mono`, `terminal-utility`, `glass-prismatic`), spins up 5 worktrees + branches, dispatches a tailored 3-agent team per variant in parallel, each variant captures desktop + mobile + interactive shots, Lead critiques and ships the picker — typically 3–4 PASS, 1–2 REDO/KILL.*
 
 ---
 
@@ -541,6 +564,7 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 ├── README.md                    ← you are here
 ├── skills/                      ← custom slash commands
 │   ├── team-build/
+│   ├── team-design/
 │   ├── linear-team-build/
 │   ├── next-feature/
 │   ├── dda/
