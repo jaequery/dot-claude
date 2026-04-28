@@ -112,10 +112,25 @@ tickets? (yes / no / subset like '1,3,5')". Default = all.
 For each selected ticket, in order, run the sub-routine below. Print
 the running results table after each ticket finishes.
 
-### 3a-pre. Resolve the target branch for this ticket
+### 3a-pre. Resolve the working branch and target branch for this ticket
 
-Each ticket can specify its own PR base. Resolve in this order; first
-match wins:
+Two distinct branches matter per ticket:
+
+- **`$WORKING_BRANCH`** — the new feature branch this build commits onto
+  and pushes. **Default to Linear's suggested branch name**
+  (`issue.branchName`, e.g. `jaequery/pin-56-bug-...`) — fetch it
+  alongside the issue:
+  ```bash
+  linear issue view "$IDENT" --json | jq -r '.branchName'
+  ```
+  If `branchName` is missing or empty, fall back to letting `/team-build`
+  generate its default `team-build/<slug>-<ts>`. **Never** prepend
+  `team-build/` to Linear's suggested name — pass it verbatim through
+  `--working-branch`.
+- **`$RESOLVED`** — the PR base / target branch (where the PR merges
+  into). Resolve in the order below; first match wins.
+
+#### Target-branch resolution order:
 
 1. **Description directive.** Scan `$DESCRIPTION` for a line matching
    (case-insensitive) `^\s*(Target|Branch|Base)\s*:\s*([^\s]+)\s*$`.
@@ -142,8 +157,8 @@ If neither, **STOP this ticket** (do not silently fall back to `main`):
 - Record verdict `SKIPPED` in the results table and continue to the
   next ticket.
 
-Print the resolution per ticket, e.g.:
-`ENG-123 → target=feature/auth (from description directive)`
+Print both resolutions per ticket, e.g.:
+`ENG-123 → working=jaequery/eng-123-add-oauth-login (from Linear branchName), target=feature/auth (from description directive)`
 
 ### 3a. Build the team-build invocation
 
@@ -171,8 +186,9 @@ Clean-code bar for this build (non-negotiable, enforce in the §5 code review):
   do not introduce a new test framework just for this ticket.
 ```
 
-Slug for the worktree: `$IDENT` lowercased (e.g. `eng-123`).
-`/team-build` adds its own timestamp suffix.
+Slug for the worktree path: `$IDENT` lowercased (e.g. `eng-123`).
+`/team-build` adds its own timestamp suffix to the worktree directory
+even when `--working-branch` overrides the branch name.
 
 ### 3b. Move the ticket to "In Progress"
 
@@ -200,14 +216,16 @@ PRS_BEFORE=$(gh pr list --state open --json number,headRefName,url --limit 200)
 ```
 
 Call `/team-build` via the Skill tool with `args` — pass the
-**ticket-resolved** branch from §3a-pre, not the global `--target`:
+**ticket-resolved** target branch from §3a-pre as `--branch`, AND
+Linear's suggested working branch (when present) as `--working-branch`:
 ```
 --branch $RESOLVED
+--working-branch $WORKING_BRANCH    # omit this line entirely if branchName was empty
 
 <prompt body from §3a>
 ```
 
-(One arg blob: the `--branch` flag, blank line, then the §3a body.)
+(One arg blob: the flags, blank line, then the §3a body.)
 
 `/team-build` runs end-to-end in that single turn (worktree, plan,
 build, security, QA, push, PR). It returns APPROVED-and-shipped,
@@ -215,15 +233,17 @@ ESCALATED, or FAILED.
 
 After it returns, verify isolation:
 - `gh pr list` must now show **exactly one** new open PR vs.
-  `PRS_BEFORE` whose head ref starts with `team-build/<ticket-slug>-`.
-  Zero or more than one new PR → STOP the loop and report.
+  `PRS_BEFORE` whose head ref equals `$WORKING_BRANCH` (when supplied)
+  or starts with `team-build/<ticket-slug>-` (fallback). Zero or more
+  than one new PR → STOP the loop and report.
 - The new branch and PR number must be unique across this run's
   results table.
 
 ### 3d. Capture the outcome
 
-Record: PR URL, PR number, branch name (must start with `team-build/`),
-worktree path, verdict, rounds run.
+Record: PR URL, PR number, branch name (Linear's `branchName` when
+supplied, else the `team-build/...` default), worktree path, verdict,
+rounds run.
 
 ### 3e. Update Linear
 

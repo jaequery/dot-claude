@@ -30,6 +30,11 @@ The user invokes `/team-build <task description>`. They may also pass:
 
 - A **target branch** (e.g. `--branch feature/foo` or "push to `develop`").
   If provided, the final approved work is pushed there and a PR is opened.
+- A **working branch** (e.g. `--working-branch jaequery/pin-56-fix-foo`).
+  If provided, this overrides the auto-generated `team-build/$SLUG-$TS`
+  branch name. Used by `/linear-team-build` to honor Linear's suggested
+  branch name (`issue.branchName`). The `team-build/` prefix is **not**
+  applied; use the name verbatim.
 - If no target branch is provided, the worktree + branch is left in place
   and the user is offered the standard cleanup menu (see §6).
 
@@ -48,8 +53,12 @@ Compute:
 - `$REPO_NAME` — basename of `$REPO_ROOT`.
 - `$SLUG` — 2–4 kebab-case words from the task (`^[a-z0-9][a-z0-9-]{0,39}$`).
 - `$TS` — `date +%Y%m%d-%H%M%S`.
-- `$BRANCH` — `team-build/$SLUG-$TS`.
-- `$WT_PATH` — `$(dirname $REPO_ROOT)/$REPO_NAME.team-build-$SLUG-$TS`.
+- `$BRANCH` — user-supplied `--working-branch <name>` if present
+  (used verbatim, no prefix added); otherwise `team-build/$SLUG-$TS`.
+- `$WT_PATH` — `$(dirname $REPO_ROOT)/$REPO_NAME.team-build-$SLUG-$TS`
+  (the worktree path keeps the `team-build-` prefix even when
+  `--working-branch` overrides `$BRANCH`, so cleanup heuristics still
+  match).
 - `$BASE_BRANCH` — current branch, or `main`/`master` if detached.
 - `$BASE_SHA` — `git rev-parse HEAD`.
 - `$TARGET_BRANCH` — user-supplied target branch, or empty.
