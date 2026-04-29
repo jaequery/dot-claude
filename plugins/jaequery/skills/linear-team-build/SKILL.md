@@ -32,10 +32,14 @@ Every build must meet the clean-code bar in §3a.
   but do not cap.
 - `--dry-run` — list tickets that would be processed and stop.
 
-**No confirmation prompt.** If invoked with no flags, just start —
-defaults are: up to 10 tickets, sequential, base = `main`, default
-clean-code bar. Print the resolved settings + ticket queue, then
-proceed. Only stop early if `--dry-run` is set or preflight (§1) fails.
+**No confirmation prompt. Ever.** If invoked with no flags, just
+start — defaults are: up to 10 tickets, sequential, base = `main`,
+default clean-code bar. Print the resolved settings + ticket queue,
+then **immediately proceed to §1 preflight and §2 ticket processing
+in the same response, without asking the user "proceed?", "yes/no?",
+or any other confirmation phrasing**. Asking is a bug — the user
+already confirmed by invoking the skill. Only stop early if
+`--dry-run` is set or preflight (§1) fails.
 
 ## Linear interface — `@schpet/linear-cli`
 
