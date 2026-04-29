@@ -282,6 +282,88 @@ the user with the full critique table — don't pretend a thin lineup
 is a lineup. They can either accept the slim picker or rerun with a
 sharper brief.
 
+## 6.5 Visual gallery (auto-opened in browser)
+
+After critique, before the terminal picker, generate a single static
+HTML gallery so the user can **see** the variants instead of reading
+about them. This is the primary picker; the terminal actions in §7
+are the keyboard fallback.
+
+Write to `$REPO_ROOT/.team-design/gallery-$SLUG-$TS/index.html` (the
+`.team-design/` dir at the repo root, not inside any worktree — it
+lives outside the variant branches so the gallery itself doesn't
+pollute any one variant). Copy each variant's screenshots from
+`$WT_V/.team-design/shots/*.png` into
+`$REPO_ROOT/.team-design/gallery-$SLUG-$TS/<variant>/` so the HTML
+loads them via relative paths and survives worktree cleanup.
+
+The page must contain, per variant, in lineup order:
+- Variant name (kebab-case slug, large) and verdict badge
+  (PASS / REDO / KILL — KILLs render greyed out, not hidden, so
+  the user sees what was tried).
+- Thesis paragraph verbatim from the brief.
+- All committed screenshots, full-width, lazy-loaded, click-to-zoom
+  (a plain `<dialog>` lightbox is enough — no framework).
+- Scores row: thesis fidelity / craft / differentiation.
+- Lead's "What works" and "What fails" bullets.
+- Branch name + worktree path as copy-to-clipboard chips.
+- Three action buttons per variant: **Pick this**, **Request redo**,
+  **Kill**. Each writes a single line to
+  `$REPO_ROOT/.team-design/gallery-$SLUG-$TS/picks.jsonl` via a
+  `fetch('/pick', …)` call to a tiny localhost server (see below);
+  if the server isn't running the buttons fall back to a
+  `navigator.clipboard.writeText()` of the equivalent terminal
+  command (`s 2`, `r 2`, `k 2`) so the user can paste it into the
+  terminal picker.
+
+Styling: black background, system-ui, generous whitespace, no
+frameworks, no build step. The gallery itself should not impose a
+design — it's a neutral viewing surface. Single self-contained HTML
+file with inline CSS and a <100-line vanilla JS block.
+
+After writing, boot a tiny localhost server to serve the gallery
+and accept pick events. Use Python's stdlib (always available on
+darwin and most linux dev boxes):
+
+```
+cd "$REPO_ROOT/.team-design/gallery-$SLUG-$TS"
+python3 -m http.server 0 >/dev/null 2>&1 &
+GALLERY_PID=$!
+# capture the actual port from the server's stderr or by writing
+# a small helper script that prints the bound port to stdout
+```
+
+Prefer a 30-line helper script `gallery-server.py` written alongside
+`index.html` that (a) serves the static files, (b) accepts
+`POST /pick` with `{variant, action}` and appends to `picks.jsonl`,
+(c) prints its bound port to stdout on startup. Run it with
+`run_in_background: true` via the Bash tool.
+
+Open it for the user automatically:
+
+```
+open "http://localhost:$PORT"   # darwin
+# fall back to xdg-open on linux; on failure, just print the URL
+```
+
+Print the URL and the PID so the user can re-open or kill the
+server later. Then proceed to §7 — the terminal picker is still
+authoritative for shipping; the gallery is for viewing and
+expressing intent.
+
+While the gallery is open, **poll `picks.jsonl` once per second**
+(or read it on demand when the user types a picker action). When
+a `pick` event arrives, treat it as if the user had typed the
+equivalent terminal command and execute it through §7's flow
+(including the typed-`yes` gates for destructive actions — the
+gallery does NOT bypass them; the user still confirms in the
+terminal before anything ships or deletes).
+
+If Python isn't available or the port can't bind, skip the server,
+write the static gallery anyway, and `open` the `index.html`
+directly via `file://`. The buttons fall back to clipboard mode in
+that case.
+
 ## 7. Final picker handoff
 
 Print the picker:
@@ -301,6 +383,7 @@ Base: $BASE_BRANCH @ $BASE_SHA   N: <N_pass>/<N_total>
 Then offer the user the **picker actions**:
 
 ```
+(g)allery         — reopen the visual gallery (§6.5) in browser
 (p)review <#>     — open the variant's hero/mobile shots inline
 (d)iff   <#>      — show git diff $BASE_SHA..team-design/<slug>-<v>
 (o)pen   <#>      — print `cd $WT_V` and the dev-server start command
@@ -342,3 +425,6 @@ one PR per variant — and report URLs back.
 - **Push only after typed-`yes`.** PRs only after push succeeds.
 - **The Lead's taste is the gate.** If everything looks the same to
   you, don't pretend; tell the user the brief was thin and re-prompt.
+- **Always open the visual gallery (§6.5) before the terminal picker.**
+  The user picks visually; the terminal is the keyboard fallback. If
+  the gallery cannot be opened, say so — don't skip silently.

@@ -26,16 +26,16 @@ Every build must meet the clean-code bar in §3a.
 - `--assignee <me|email|userId>` — filter to one assignee. Default: any.
 - `--limit <n>` — cap how many tickets to process this run. Default: 10.
 - `--target <branch>` — base branch for PRs. Default: `main`.
-- `--parallel <n>` — process N tickets concurrently. **Default: all of
-  them** (i.e. `--parallel = number of selected tickets`). Pass an
-  explicit number to throttle; pass `--parallel 1` to force sequential.
-  Warn if effective concurrency exceeds 5 (shared `gh`/Linear rate
-  limits) but do not cap.
+- `--parallel <n>` — process N tickets concurrently. **Default: 1
+  (sequential).** Pass an explicit number to parallelize. Warn if
+  effective concurrency exceeds 5 (shared `gh`/Linear rate limits)
+  but do not cap.
 - `--dry-run` — list tickets that would be processed and stop.
 
-If invoked with no flags, ask ONE question: "Process up to 10 tickets,
-all in parallel, base = main, default clean-code bar — proceed?"
-Default to those values on a plain "yes".
+**No confirmation prompt.** If invoked with no flags, just start —
+defaults are: up to 10 tickets, sequential, base = `main`, default
+clean-code bar. Print the resolved settings + ticket queue, then
+proceed. Only stop early if `--dry-run` is set or preflight (§1) fails.
 
 ## Linear interface — `@schpet/linear-cli`
 
@@ -107,8 +107,8 @@ Sort: `priority` ascending (1=urgent first; 0=no-priority last), then
 2. ENG-130  [P2]  "Fix invoice rounding"     (bob@…)
 ```
 
-If `--dry-run`, stop. Otherwise: "Run team-build against all N
-tickets? (yes / no / subset like '1,3,5')". Default = all.
+If `--dry-run`, stop. Otherwise proceed immediately against all N
+tickets — no confirmation prompt.
 
 ## 3. Per-ticket loop
 
@@ -187,13 +187,24 @@ Clean-code bar for this build (non-negotiable, enforce in the §5 code review):
 - Validate at boundaries only; trust internal callers.
 - Tests where they make sense and the project already has a test setup;
   do not introduce a new test framework just for this ticket.
+
+---
+Push policy for this run (non-negotiable):
+- **Do not gate the push.** Skip the §6 typed-`yes` confirmation entirely.
+- Push `$WORKING_BRANCH` to `origin` and open the PR against `--branch`
+  as soon as the build round + security audit + code review have run,
+  regardless of QA verdict. Don't loop indefinitely waiting for an
+  APPROVED gate before pushing — push, open the PR, and surface any
+  remaining issues in the PR body so a human can review on GitHub.
+- This is autonomous Linear backlog burndown; treat the PR itself as
+  the review surface, not a local gate.
 ```
 
 Slug for the worktree path: `$IDENT` lowercased (e.g. `eng-123`).
 `/team-build` adds its own timestamp suffix to the worktree directory
 even when `--working-branch` overrides the branch name.
 
-### 3b. Move the ticket to "In Progress"
+### 3b. Move the ticket to "In Progress" + post a "starting" comment
 
 Before launching, transition the ticket:
 ```bash
@@ -203,6 +214,28 @@ The CLI matches state name on the issue's team. If the team has no
 state named "In Progress" but has another `started`-type state, retry
 with that name. On any failure, log a warning and continue —
 do not block the build on Linear state.
+
+Then post a status comment so non-terminal stakeholders can follow
+along. Write to a temp file and use `--body-file`:
+
+```markdown
+### 🛠️ team-build started
+
+- **Working branch:** `$WORKING_BRANCH`
+- **Target (PR base):** `$RESOLVED`
+- **Worktree slug:** `$IDENT_LOWER`
+- **Mode:** `/team-build` (plan → parallel specialist build → security audit → QA + code review, looping until clean)
+- **Clean-code bar:** reuse existing patterns, minimal diff, no dead code/TODOs/console.logs.
+
+I'll comment again when the build finishes (APPROVED → PR link + screenshots if UX, ESCALATED/FAILED → blocker summary).
+```
+
+```bash
+linear issue comment add "$IDENT" --body-file /tmp/ltb-start-$IDENT.md
+```
+
+Comment is best-effort: if it fails, log and proceed — never block the
+build on a comment failure. Skip this comment when `--dry-run`.
 
 ### 3c. Invoke `/team-build` — ONE invocation per ticket
 
@@ -246,7 +279,94 @@ After it returns, verify isolation:
 
 Record: PR URL, PR number, branch name (Linear's `branchName` when
 supplied, else the `team-build/...` default), worktree path, verdict,
-rounds run.
+rounds run. Also capture `$ISSUE_ID` (UUID) and `$TEAM_ID` (UUID) from
+`linear issue view "$IDENT" --json` — needed by §3d.5 for `fileUpload`.
+
+### 3d.5. Screenshot capture (UX/design tickets only)
+
+Only runs when verdict is **APPROVED** AND the ticket touches the UI.
+Otherwise skip this section entirely.
+
+**Detection (any one fires):**
+1. The PR diff contains frontend-shaped files. From the merged worktree
+   or via `gh`:
+   ```bash
+   gh pr diff "$PR_NUMBER" --name-only \
+     | grep -E '\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less|stylus)$|/(components|pages|app|views|routes|styles|public)/' \
+     | head -1
+   ```
+2. The Linear ticket has a label matching `^(ui|ux|design|frontend|web|mobile)$` (case-insensitive).
+3. The title or description contains any of: `UI`, `UX`, design,
+   layout, style, visual, page, screen, component, button, form,
+   modal, theme, responsive, dark mode (case-insensitive whole-word).
+
+If none fire → skip §3d.5 and proceed to §3e with no shots.
+
+**Capture (best-effort; never block the loop):**
+
+Work inside `$WT` (the worktree `/team-build` produced for this
+ticket). If `/team-build` already cleaned the worktree on APPROVED
+(per its §6a), re-create one read-only checkout for screenshotting:
+```bash
+SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.shot-$IDENT-$$"
+git worktree add --detach "$SHOT_WT" "$WORKING_BRANCH"
+```
+(Mark this worktree for cleanup at the end of the ticket regardless
+of outcome.)
+
+Boot the project's dev server with the conventional command for the
+detected stack — try in order, first that exists wins, run in the
+background, capture the URL:
+- `package.json` script `dev` → `npm run dev` (or `pnpm dev` / `yarn dev` / `bun dev` matching the lockfile).
+- `package.json` script `start` → `npm start`.
+- `bin/dev`, `bin/rails server`, `php artisan serve`, `python manage.py runserver`, `go run .` — only if they're already wired in this repo.
+
+Wait up to 30s for the server to respond on its printed URL (or the
+conventional default: `http://localhost:3000`, `:5173`, `:4321`,
+`:8000`, `:8080` — try in that order). If nothing answers, abort §3d.5,
+note `screenshots not captured: dev server did not boot` and proceed
+to §3e without images.
+
+Pick the URL to shoot:
+- If the ticket description contains a line `Screenshot: <path>` or
+  `Preview: <path>`, append that path to the base URL.
+- Else default to `/`.
+
+Capture three shots via Playwright MCP (`mcp__playwright__*`):
+1. Desktop, viewport `1440x900` — save as `01-desktop.png`.
+2. Mobile, viewport `390x844` — save as `02-mobile.png`.
+3. Same desktop URL after one interaction (scroll one viewport, or
+   focus the first interactive element) — `03-state.png`.
+
+Save under `$SHOT_WT/.linear-team-build/shots/$IDENT/`. Tear down the
+dev server (kill the background PID) before continuing. If any
+individual shot fails, keep the ones that succeeded; do not retry.
+
+**Upload to Linear** (mirrors `/linear-design` §4a). For each PNG:
+```bash
+SIZE=$(wc -c < "$SHOT")
+NAME=$(basename "$SHOT")
+RESP=$(linear api '
+mutation($filename:String!,$contentType:String!,$size:Int!){
+  fileUpload(filename:$filename, contentType:$contentType, size:$size, makePublic:false){
+    success
+    uploadFile { uploadUrl assetUrl headers { key value } }
+  }
+}' --variables "$(jq -n --arg f "$NAME" --arg ct image/png --argjson s "$SIZE" \
+    '{filename:$f, contentType:$ct, size:$s}')")
+UPLOAD_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
+ASSET_URL=$(echo "$RESP"  | jq -r '.data.fileUpload.uploadFile.assetUrl')
+HDR_ARGS=(); while IFS= read -r row; do
+  HDR_ARGS+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
+done < <(echo "$RESP" | jq -c '.data.fileUpload.uploadFile.headers[]')
+curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$SHOT"
+```
+Record each `$ASSET_URL`. If `success:false` or curl is non-2xx for a
+shot, drop just that shot and continue — never block §3e on an upload
+failure.
+
+Clean up `$SHOT_WT` (`git worktree remove --force "$SHOT_WT"`) before
+returning to §3e.
 
 ### 3e. Update Linear
 
@@ -259,7 +379,13 @@ multi-line markdown survives shell quoting.
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
   linear issue update  "$IDENT" --state "In Review"   # falls back to leaving in "In Progress" if not present
   ```
-  Comment body: the PR URL plus a one-line summary.
+  Comment body: the PR URL plus a one-line summary. **If §3d.5
+  produced any uploaded screenshots, append a `### Screenshots` section
+  embedding each as `![<label>]($ASSET_URL)` in capture order
+  (desktop → mobile → state).** If §3d.5 ran but captured nothing
+  (server didn't boot, etc.), append a single line:
+  `_Screenshots not captured: <reason>_`. If §3d.5 was skipped (not a
+  UX/design ticket), omit the section entirely.
 - **ESCALATED or FAILED:**
   ```bash
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
@@ -281,13 +407,12 @@ the results table.
 
 ## 4. Parallel mode
 
-Default: **all selected tickets run concurrently** (effective
-`--parallel = N_selected`). Each `/team-build` produces its own
-worktree (`team-build/...`), so they don't collide. Pass `--parallel
-<n>` to throttle; pass `--parallel 1` to force sequential for
-debugging or ordering. If effective concurrency exceeds 5, warn the
-user about shared `gh`/Linear rate limits but do not cap — the user
-asked for it.
+Default: **sequential** (`--parallel 1`). Tickets run one at a time so
+output stays readable and rate limits don't bite. Pass `--parallel
+<n>` to opt into concurrency — each `/team-build` produces its own
+worktree (`team-build/...`), so they don't collide on disk. If
+effective concurrency exceeds 5, warn the user about shared
+`gh`/Linear rate limits but do not cap — the user asked for it.
 
 ## 5. Final summary
 
@@ -335,3 +460,11 @@ worktrees here — they are already gone.
   isn't authed, abort before touching Linear.
 - Don't open more than 10 PRs per run unless the user explicitly
   raised `--limit` past 10.
+- **Screenshots for UX/design tickets (§3d.5) are best-effort, never
+  blocking.** Detection is by frontend-shaped diff, design label, or
+  UI keywords in the ticket. Capture with Playwright after a local
+  dev-server boot, upload via Linear's `fileUpload` mutation, and
+  embed in the APPROVED comment. Failure modes (no dev server,
+  capture error, upload non-2xx) downgrade to a `_Screenshots not
+  captured: <reason>_` line — never abort the ticket and never
+  fabricate an image.
