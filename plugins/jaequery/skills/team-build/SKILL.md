@@ -600,16 +600,29 @@ in the same section instead of omitting it.
    `$TARGET_BRANCH`, else `$BASE_SHA`. Pick the first that exists.
 4. Record lease target before rebase:
    `LEASE=$(git -C "$WT_PATH" rev-parse "origin/$BRANCH" 2>/dev/null || echo "")`.
-5. `cd "$WT_PATH" && git rebase "$BASE_REF"` — on conflict, STOP and
-   hand back to the user; do not run `git rebase --abort`.
-6. **Typed-`yes` gate** before pushing: show `$BRANCH`, the LEASE target
+5. **Merge-conflict preflight.** Probe whether `$BRANCH` merges cleanly
+   into `$BASE_REF` before touching the index:
+   `git -C "$WT_PATH" merge-tree --write-tree --name-only --no-messages "$BASE_REF" "$BRANCH"`.
+   If the output contains any filenames (conflicting paths), STOP and
+   list them to the user — do not proceed to step 6.
+6. `cd "$WT_PATH" && git rebase "$BASE_REF"` — on conflict, STOP and
+   hand back to the user; do not run `git rebase --abort`. The user
+   resolves locally (`git add` + `git rebase --continue`) and re-runs.
+7. **Post-rebase conflict guard.** Before pushing, verify the working
+   tree is clean and no conflict markers survived:
+   - `git -C "$WT_PATH" status --porcelain` must be empty.
+   - `git -C "$WT_PATH" ls-files -u` must be empty (no unmerged entries).
+   - `git -C "$WT_PATH" grep -nE '^(<{7}|={7}|>{7}) ' -- ':!*.md'` must
+     return nothing (no leftover `<<<<<<<` / `=======` / `>>>>>>>` markers).
+   Any check failing → STOP and report to the user. Do not push.
+8. **Typed-`yes` gate** before pushing: show `$BRANCH`, the LEASE target
    (or "first push"), and `$BASE_REF`. Require literal `yes`.
-7. Push:
+9. Push:
    - LEASE non-empty: `git -C "$WT_PATH" push --force-with-lease="$BRANCH:$LEASE" --force-if-includes -u origin "$BRANCH"`.
    - LEASE empty: `git -C "$WT_PATH" push -u origin "$BRANCH"`.
-8. `cd "$WT_PATH" && gh pr create --fill --base "$TARGET_BRANCH"`. If
-   `gh` is missing, print the push URL from step 7 and stop.
-9. **Auto-cleanup after successful push + PR**: once the PR has been
+10. `cd "$WT_PATH" && gh pr create --fill --base "$TARGET_BRANCH"`. If
+    `gh` is missing, print the push URL from step 9 and stop.
+11. **Auto-cleanup after successful push + PR**: once the PR has been
    opened (the branch lives on origin and locally), remove the worktree
    automatically — no question:
    ```
@@ -620,7 +633,7 @@ in the same section instead of omitting it.
    uncommitted changes survived push), fall back to asking the user
    whether to force-remove or keep — do not silently leave artifacts
    without flagging.
-10. **Drop the per-worktree DB** if §1.5 created one. Run from
+12. **Drop the per-worktree DB** if §1.5 created one. Run from
     `$REPO_ROOT` against the same compose service:
     - **Postgres:**
       ```

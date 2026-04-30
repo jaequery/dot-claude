@@ -66,10 +66,12 @@ REST API**, called with `curl`. No MCP, no SDK.
 - **Base URL.** Hard-coded to `http://localhost:3636/api/v1`.
   Planbooq runs locally for every developer; there is no remote
   deployment to configure. Do **not** read this from an env var.
-- **Auth.** `Authorization: Bearer $PLANBOOQ_API_TOKEN` (a
-  `pbq_live_…` key from Settings → API Keys). If unset, abort with
-  a one-liner asking the user to `export PLANBOOQ_API_TOKEN=…`
-  (or add it to `~/.claude.json`'s `env` block).
+- **Auth.** `Authorization: Bearer $PLANBOOQ_API_KEY` (a
+  `pbq_live_…` key from Settings → API Keys). If unset, **prompt
+  the user once via `AskUserQuestion`** for the key, then persist
+  it to `~/.claude.json`'s `env` block so future runs (and other
+  Claude Code sessions) never re-prompt. See §1 step 1 for the
+  exact persistence flow.
 - **Headers.** `Content-Type: application/json` on every request.
 - **Response envelope.** Every response is
   `{ "ok": true, "data": … }` on success, or
@@ -83,13 +85,13 @@ PBQ() {
   local method="$1" path="$2" body="${3:-}"
   if [ -n "$body" ]; then
     curl -fsS -X "$method" \
-      -H "Authorization: Bearer $PLANBOOQ_API_TOKEN" \
+      -H "Authorization: Bearer $PLANBOOQ_API_KEY" \
       -H "Content-Type: application/json" \
       --data "$body" \
       "http://localhost:3636/api/v1$path"
   else
     curl -fsS -X "$method" \
-      -H "Authorization: Bearer $PLANBOOQ_API_TOKEN" \
+      -H "Authorization: Bearer $PLANBOOQ_API_KEY" \
       "http://localhost:3636/api/v1$path"
   fi
 }
@@ -155,12 +157,35 @@ named "Review" before re-running.` Other missing columns (`QA`,
 
 ## 1. Preflight
 
-1. **Token set.** `PLANBOOQ_API_TOKEN` must be exported (the base URL
+1. **Token set.** `PLANBOOQ_API_KEY` must be available (the base URL
    is hard-coded to `http://localhost:3636/api/v1`, so no env var is
-   needed for it). If the token is missing, stop and tell the user
-   how to set it (it can also live in `~/.claude.json`'s `env` block).
+   needed for it). If `$PLANBOOQ_API_KEY` is empty:
+   1. **Prompt once** via `AskUserQuestion` — single free-text question:
+      `"Enter your Planbooq API token (pbq_live_… from Settings → API
+      Keys). I'll save it to ~/.claude.json so you're never prompted
+      again."`
+   2. **Validate** the answer is non-empty and starts with `pbq_` (warn
+      but accept if the prefix differs — the user may be on a custom
+      build). On empty, abort.
+   3. **Persist to `~/.claude.json`** at the user level by merging into
+      the top-level `env` object (creating it if missing). Use `jq` to
+      keep the file valid:
+      ```bash
+      tmp=$(mktemp) && jq --arg k "$ANSWERED_TOKEN" \
+        '.env = ((.env // {}) + {PLANBOOQ_API_KEY: $k})' \
+        ~/.claude.json > "$tmp" && mv "$tmp" ~/.claude.json
+      ```
+      If `~/.claude.json` does not exist, create it with
+      `{"env":{"PLANBOOQ_API_KEY":"<key>"}}`. Never echo the token
+      value back to the terminal in plain text after saving.
+   4. **Export for the current run** so the rest of this skill works
+      without a Claude Code restart: `export PLANBOOQ_API_KEY="<key>"`.
+   5. Print one line confirming where it was saved
+      (`Saved PLANBOOQ_API_KEY to ~/.claude.json (env block).
+      Future sessions will pick it up automatically.`) and continue.
+
    **Server reachable.** Sanity-check that the local Planbooq is
-   running with `curl -fsS http://localhost:3636/api/v1/workspaces -H "Authorization: Bearer $PLANBOOQ_API_TOKEN"`;
+   running with `curl -fsS http://localhost:3636/api/v1/workspaces -H "Authorization: Bearer $PLANBOOQ_API_KEY"`;
    on connection refused, abort with `Planbooq is not running on
    localhost:3636 — start it (e.g. \`pnpm dev\` in the planbooq repo)
    and re-run.`
@@ -494,7 +519,7 @@ persist for manual debugging.
   rule: **PR opened → `Review` (any verdict); no PR → back to
   `Planning`**.
 - **All Planbooq reads/writes go through the REST API at
-  `http://localhost:3636/api/v1` with `Bearer $PLANBOOQ_API_TOKEN`.** No MCP,
+  `http://localhost:3636/api/v1` with `Bearer $PLANBOOQ_API_KEY`.** No MCP,
   no SDK, no scraping the web UI. Always check `.ok` on the response
   envelope before reading `.data`.
 - Always resolve IDs via list endpoints before creating — never
