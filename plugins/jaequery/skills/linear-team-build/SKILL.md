@@ -20,7 +20,29 @@ Every build must meet the clean-code bar in §3a.
 
 ## 0. Inputs
 
-`/linear-team-build [flags]`. Optional flags:
+`/linear-team-build [task description] [flags]`.
+
+**Positional arg (optional).** If a free-form task description is
+passed, **create the ticket on the fly first** (in Todo state, on
+`--team`), then proceed with normal queue processing — the new
+ticket is included in this run's queue. Use:
+
+```bash
+linear issue create \
+  --title "<first line of description, ≤80 chars>" \
+  --description-file /tmp/ltb-new-$$.md \
+  --state Todo \
+  ${TEAM:+--team "$TEAM"} \
+  ${ASSIGNEE:+--assignee "$ASSIGNEE"} \
+  --json
+```
+
+The remainder of the description goes in `--description-file`. If
+`--team` is unset and the workspace has multiple teams, abort with
+a message asking the user to pass `--team`. Echo the new ticket's
+identifier and URL before continuing.
+
+Optional flags:
 - `--team <key>` — Linear team key (e.g. `ENG`). Default: all teams the
   API key can see.
 - `--assignee <me|email|userId>` — filter to one assignee. Default: any.

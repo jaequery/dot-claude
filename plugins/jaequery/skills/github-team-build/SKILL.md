@@ -25,7 +25,34 @@ written to the project's native Status field — not labels.
 
 ## 0. Inputs
 
-`/github-team-build [flags]`. Optional flags:
+`/github-team-build [task description] [flags]`.
+
+**Positional arg (optional).** If a free-form task description is
+passed, **create the issue on the fly first**, add it to the
+project, set its Status to `Todo`, then proceed with normal queue
+processing — the new issue is included in this run's queue. Use:
+
+```bash
+NEW_URL=$(gh issue create \
+  --repo "$REPO" \
+  --title "<first line of description, ≤80 chars>" \
+  --body-file /tmp/gtb-new-$$.md \
+  ${ASSIGNEE:+--assignee "$ASSIGNEE"})
+NEW_ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" \
+  --owner "$OWNER" --url "$NEW_URL" --format json | jq -r .id)
+gh project item-edit \
+  --id "$NEW_ITEM_ID" \
+  --project-id "$PROJECT_ID" \
+  --field-id "$STATUS_FIELD_ID" \
+  --single-select-option-id "$OPT_TODO"
+```
+
+The full description (everything after the first line) goes in
+`--body-file`. Echo the new issue number and URL before continuing.
+This requires the project + Status field to be resolved, so on-the-fly
+creation runs **after** §1 preflight, before §2 fetch.
+
+Optional flags:
 - `--repo <owner/name>` — target repo. Default: the current
   directory's `gh repo view --json nameWithOwner`.
 - `--project <number|title>` — project to read from. Accepts a
