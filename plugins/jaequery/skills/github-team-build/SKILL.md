@@ -103,7 +103,7 @@ Canonical commands used below:
   enumerate fields; the `Status` field (a `ProjectV2SingleSelectField`)
   has an `id` and `options[]` with `id` + `name` per option.
 - `gh project field-create <number> --owner <owner> --name Status \
-   --data-type SINGLE_SELECT --single-select-options "Backlog,Planning,Todo,In Progress,In Review,QA,Completed"`
+   --data-type SINGLE_SELECT --single-select-options "Backlog,Planning,Todo,In Progress,Reviewing,QA,Completed"`
   — only used if the project lacks a Status field (rare; v2 default
   templates ship with Status pre-populated to Todo / In Progress /
   Done). To extend the default, use `gh project field-edit` to add
@@ -127,7 +127,7 @@ Workflow state is the project's **native Status field**. The full
 lifecycle this skill expects:
 
 ```
-Backlog → Planning → Todo → In Progress → In Review → QA → Completed
+Backlog → Planning → Todo → In Progress → Reviewing → QA → Completed
 ```
 
 Humans drive the ends; this skill drives the middle:
@@ -135,13 +135,13 @@ Humans drive the ends; this skill drives the middle:
 - `Planning` — being scoped. Humans only.
 - `Todo` — **input queue this skill consumes**.
 - `In Progress` — set when team-build starts on an issue.
-- `In Review` — set when team-build opens a PR (APPROVED outcome).
+- `Reviewing` — set when team-build pushes a PR (any verdict — the PR is the review surface).
 - `QA` — set after merge; humans (or downstream automation) drive.
 - `Completed` — final state; humans (or PR merge) drive.
 
-This skill only mutates `Todo` → `In Progress` → `In Review` (or
-back to `Todo` on failure). It never writes `Backlog`, `Planning`,
-`QA`, or `Completed`.
+This skill only mutates `Todo` → `In Progress` → `Reviewing` (or
+back to `Todo` if no PR was opened). It never writes `Backlog`,
+`Planning`, `QA`, or `Completed`.
 
 **Caching.** Resolve `$PROJECT_ID`, `$STATUS_FIELD_ID`, and the
 `name → option-id` map for Status options **once at preflight** and
@@ -175,19 +175,52 @@ reuse for every transition — these never change mid-run.
       ```
    Cache `$PROJECT_NUMBER`, `$PROJECT_ID` (the GraphQL node id), and
    `$PROJECT_URL`.
+
+   **If the project was just auto-created, flip its default view to a
+   board (kanban) layout grouped by Status.** New `gh project create`
+   projects default to a table view; users expect kanban. After §1.6
+   resolves `$STATUS_FIELD_ID`, run (best-effort — log a warning and
+   continue if any step fails):
+   ```bash
+   DEFAULT_VIEW_ID=$(gh api graphql -f query='
+     query($id: ID!) {
+       node(id: $id) {
+         ... on ProjectV2 { views(first: 1) { nodes { id } } }
+       }
+     }' -F id="$PROJECT_ID" \
+     | jq -r '.data.node.views.nodes[0].id')
+   gh api graphql -f query='
+     mutation($view: ID!, $field: ID!) {
+       updateProjectV2View(input: {
+         viewId: $view, layout: BOARD_LAYOUT
+       }) { projectV2View { id } }
+       updateProjectV2View(input: {
+         viewId: $view, groupByFieldId: $field
+       }) { projectV2View { id } }
+     }' -F view="$DEFAULT_VIEW_ID" -F field="$STATUS_FIELD_ID"
+   ```
+   If the GraphQL mutation isn't available on the caller's `gh`
+   version, surface the project URL and a one-line note: `default
+   view left as table — switch to Board manually if desired`.
 6. **Status field resolved (or extended).** Run
    `gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json`.
    Find the field where `name == "Status"` and `dataType ==
    "SINGLE_SELECT"`. Cache `$STATUS_FIELD_ID` and the
    `name → option-id` map. Required option names: `Backlog`,
-   `Planning`, `Todo`, `In Progress`, `In Review`, `QA`,
+   `Planning`, `Todo`, `In Progress`, `Reviewing`, `QA`,
    `Completed`. For each missing option, extend the field via
    `gh project field-edit` (or, if the project has no Status field
    at all — uncommon — create it via `gh project field-create
    --data-type SINGLE_SELECT --single-select-options "..."`).
-   Best-effort: if extension fails, log a warning and proceed —
-   transitions for any missing target option will be skipped with
-   a note in the results table.
+   **Verify after extension** by re-running `gh project field-list`
+   and asserting every required option is present in the cached
+   `name → option-id` map. **`Reviewing` is mandatory** — if it's
+   still missing after the extension attempt, abort the run with
+   `Status field is missing the 'Reviewing' option and could not
+   be added (check write:project scope).` rather than silently
+   skipping the §3e transition. Other missing options (e.g. `QA`,
+   `Completed`) downgrade to a warning since this skill never
+   writes them.
 7. **`/team-build` reachable.** This skill invokes it via the Skill
    tool; if not listed as available, abort.
 
@@ -502,16 +535,25 @@ Use `gh` for the comment and `gh project item-edit` for the Status
 transition. Always write the comment body to a temp file and pass
 `--body-file` so multi-line markdown survives shell quoting.
 
-- **APPROVED + PR opened:**
+**Status transition is decided by whether a PR was opened, not by
+the QA verdict.** The push policy in §3a sends a PR up regardless of
+verdict, so the PR itself is the review surface — once it exists, the
+issue belongs in `Reviewing`.
+
+- **PR was opened (any verdict — APPROVED, ESCALATED, or FAILED but
+  team-build still pushed):**
   ```bash
   gh issue comment "$NUMBER" --repo "$REPO" --body-file /tmp/gtb-comment-$NUMBER.md
   gh project item-edit \
     --id "$ITEM_ID" \
     --project-id "$PROJECT_ID" \
     --field-id "$STATUS_FIELD_ID" \
-    --single-select-option-id "$OPT_IN_REVIEW"
+    --single-select-option-id "$OPT_REVIEWING"
   ```
-  Comment body: the PR URL plus a one-line summary. **If §3d.5
+  Comment body: the PR URL plus a one-line summary AND the verdict
+  (APPROVED / ESCALATED / FAILED) so reviewers know whether the local
+  QA gate passed. For non-APPROVED verdicts, also include the blocker
+  summary so a human can pick up where the loop stopped. **If §3d.5
   produced any uploaded screenshots, append a `### Screenshots`
   section embedding each as `![<label>]($RAW_URL)` in capture order
   (desktop → mobile → state).** If §3d.5 ran but captured nothing,
@@ -521,7 +563,8 @@ transition. Always write the comment body to a temp file and pass
   issue manually — the PR's `Closes #$NUMBER` will close it on
   merge. Do **not** flip the project Status to `QA` or `Completed`
   here; that's a human / downstream responsibility.
-- **ESCALATED or FAILED:**
+- **No PR was opened (environmental abort, preflight stop, target
+  branch missing, etc.):**
   ```bash
   gh issue comment "$NUMBER" --repo "$REPO" --body-file /tmp/gtb-comment-$NUMBER.md
   gh project item-edit \
@@ -590,8 +633,11 @@ worktrees here — they are already gone.
   embedded in every team-build prompt and must be enforced by the
   Team Lead's §6 code-review gate. Re-roll if violated.
 - Always update the issue (comment + project Status) after each
-  issue. Never leave an issue stranded in `In Progress` on failure
-  — on ESCALATED/FAILED, flip Status back to `Todo`.
+  issue. Never leave an issue stranded in `In Progress`. The
+  transition rule is: **PR opened → `Reviewing` (regardless of
+  verdict); no PR → back to `Todo`**. The PR is the review surface,
+  so once it's pushed the issue belongs in the Reviewing column even
+  if the local QA verdict was ESCALATED or FAILED.
 - **Use the `gh` CLI for every GitHub read/write.** No raw `curl`
   to api.github.com. Fall back to `gh api` only when no structured
   subcommand exposes a needed field.
