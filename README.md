@@ -69,6 +69,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
 - [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
+- [`/github-team-build`](#github-team-build) — Burn down the **Todo** column of a GitHub Project (v2) kanban board: one `/team-build` invocation per issue, one PR per issue (auto-closes via `Closes #<n>`); auto-creates the project if missing.
 - [`/linear-design`](#linear-design) — File a Linear ticket for a design task, run `/team-design`, post each variant's screenshots back as comments on the ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
@@ -166,6 +167,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Pulls the top 5 ENG-team Todo tickets, processes each one sequentially: own worktree, own branch (`team-build/eng-123-…`), own PR. Linear state moves Todo → In Progress → In Review per ticket; final table shows verdicts and PR URLs.*
+
+---
+
+### `/github-team-build`
+
+**What it does.** Pulls every issue in the **Todo** column of a GitHub Project (v2) kanban board and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per issue**. Each PR body includes `Closes #<n>` so merging auto-closes the issue. Never bundles issues. Auto-creates the project + extends its Status field options if missing.
+
+**When to use.** Burning down a triaged GitHub Project board autonomously, where each issue is sized for a single PR and you want the orchestrator to handle Status transitions, comments, and PR creation through the project's native kanban.
+
+**How to invoke.** `/github-team-build [flags]`. Flags: `--repo <owner/name>` (default: current repo), `--project <number|title>` (default: first project linked to the repo, or auto-create one titled `<repo-name>`), `--owner <login>` (default: owner of `--repo`), `--assignee <@me|login>`, `--limit <n>` (default 10), `--target <branch>` (default: repo default branch), `--parallel <n>` (default: 1 / sequential; warns above 5 but does not cap), `--dry-run`. Requires authed `gh` with `project` scope (`gh auth refresh -s project` if missing).
+
+**What you get.** Numbered issue queue → per-issue loop (resolve target branch → flip project Status to `In Progress` → **post a "build started" status comment** with working branch / target / mode → invoke `/team-build` with `--working-branch <number>-<kebab-title>` → verify exactly one new PR appeared and contains `Closes #<n>` → for UX/design issues, capture desktop+mobile+state screenshots via Playwright, commit them to the PR branch, embed via `raw.githubusercontent.com` URLs → comment PR URL → flip Status to `In Review`) → final summary table. Issue auto-closes on PR merge; downstream automation/humans drive `QA` and `Completed`.
+
+**How it works.** All GitHub reads/writes go through `gh` — `gh project list/create/link`, `gh project field-list/field-edit` (resolve & extend the Status field), `gh project item-list --format json` (filter to `status == "Todo"`), `gh project item-edit` (set Status), `gh issue view/comment`, `gh pr list/edit`. No raw `curl`. The full kanban lifecycle is `Backlog → Planning → Todo → In Progress → In Review → QA → Completed`; the skill only writes the middle three (`Todo` ↔ `In Progress` ↔ `In Review`), humans/downstream drive the rest. **Working branch defaults to GitHub's "Create branch" convention** (`<number>-<kebab-title>`, truncated to 60 chars) and is passed to `/team-build` via `--working-branch`; an explicit `Branch: <name>` line in the issue body overrides it. Per-issue *target* branch resolution: body directive (`Target: <branch>`) → label (`target:<branch>`) → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed issues are flipped back to `Todo` with a comment. Embeds the same clean-code bar as `/linear-team-build` into every per-issue prompt. **Push is not gated** — the PR itself is the review surface.
+
+**Example.**
+
+```
+/github-team-build --repo myorg/myapp --limit 5
+```
+
+*Resolves (or creates) the project linked to `myorg/myapp`, ensures its Status field has the seven kanban options, pulls the top 5 issues currently in Todo, processes each one sequentially: own worktree, own branch (`123-add-oauth-login`), own PR with `Closes #123` in the body. Project Status moves Todo → In Progress → In Review per issue; final table shows verdicts and PR URLs.*
 
 ---
 
@@ -612,6 +635,7 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 │   ├── team-build/
 │   ├── team-design/
 │   ├── linear-team-build/
+│   ├── github-team-build/
 │   ├── linear-design/
 │   ├── next-feature/
 │   ├── dda/
