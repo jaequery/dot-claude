@@ -70,6 +70,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
 - [`/github-team-build`](#github-team-build) — Burn down the **Todo** column of a GitHub Project (v2) kanban board: one `/team-build` invocation per issue, one PR per issue (auto-closes via `Closes #<n>`); auto-creates the project if missing.
+- [`/planbooq-team-build`](#planbooq-team-build) — Burn down a Planbooq (homebrew Linear clone) "Todo" queue via the Planbooq MCP server: one `/team-build` invocation per ticket, one PR per ticket; status auto-flips to `Reviewing` once the PR is up.
 - [`/linear-design`](#linear-design) — File a Linear ticket for a design task, run `/team-design`, post each variant's screenshots back as comments on the ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
@@ -189,6 +190,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Resolves (or creates) the project linked to `myorg/myapp`, ensures its Status field has the seven kanban options, pulls the top 5 issues currently in Todo, processes each one sequentially: own worktree, own branch (`123-add-oauth-login`), own PR with `Closes #123` in the body. Project Status moves Todo → In Progress → Reviewing per issue; final table shows verdicts and PR URLs.*
+
+---
+
+### `/planbooq-team-build`
+
+**What it does.** Pulls every ticket in the **Todo** workflow state of a Planbooq workspace (Planbooq is our homebrew Linear clone) and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per ticket**. Each PR body references the Planbooq ticket so the merge is traceable. Never bundles tickets.
+
+**When to use.** Burning down a triaged Planbooq backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle workflow-state transitions, comments, and PR creation through Planbooq's native API.
+
+**How to invoke.** `/planbooq-team-build [task description] [flags]`. Positional arg creates the ticket on the fly (in `Todo`) before the queue runs. Flags: `--team <key>` (default: all teams the API key sees, or the only team if there's exactly one), `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1; warns above 5 but does not cap), `--dry-run`. Requires `PLANBOOQ_API_TOKEN` (`pbq_live_…` from Settings → API Keys) in the env, and the Planbooq MCP server wired into Claude Code at `http://localhost:3636/api/mcp` with `Authorization: Bearer ${PLANBOOQ_API_TOKEN}`.
+
+**What you get.** Numbered ticket queue → per-ticket loop (resolve target branch → flip workflow state to `In Progress` → post a "build started" comment → invoke `/team-build` with `--working-branch <pbq-id>-<kebab-title>` → verify exactly one new PR appeared and references the ticket → for UX/design tickets, capture desktop+mobile+state screenshots via Playwright and embed via `raw.githubusercontent.com` URLs → comment PR URL → flip workflow state to `Reviewing`) → final summary table. Workflow-state transition is keyed off **whether a PR was opened** (any verdict), not the local QA gate — the PR is the review surface.
+
+**How it works.** All Planbooq reads/writes go through the Planbooq MCP server (`mcp__planbooq__list_issues`, `…__get_issue`, `…__create_issue`, `…__update_issue`, `…__add_comment`, plus team / workflow-state lookups). No raw `curl` to the Planbooq API. PRs are still opened via `gh` against GitHub. The lifecycle this skill writes is `Todo → In Progress → Reviewing` (humans / downstream automation drive `QA`, `Done`, `Canceled`). **`Reviewing` is mandatory** — preflight aborts if the team's workflow lacks it. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Embeds the same clean-code bar as `/linear-team-build` and `/github-team-build` into every per-ticket prompt. **Push is not gated** — the PR itself is the review surface, even on ESCALATED/FAILED verdicts.
+
+**Example.**
+
+```
+/planbooq-team-build --team ENG --limit 5
+```
+
+*Resolves the ENG team in Planbooq, validates its workflow has Todo / In Progress / Reviewing, pulls the top 5 tickets currently in Todo, processes each one sequentially: own worktree, own branch (`pbq-123-add-oauth-login`), own PR referencing the ticket. Workflow state moves Todo → In Progress → Reviewing per ticket; final table shows verdicts and PR URLs.*
 
 ---
 
