@@ -198,7 +198,24 @@ named "Review" before re-running.` Other missing columns (`QA`,
    and the list has exactly one workspace, use it; otherwise abort
    with `Multiple workspaces visible to this token — pass --workspace`.
 4. **Project resolved (if scoped).** If `--project` is set, validate
-   via `GET /workspaces/{id}/projects` (match by `id` or `slug`).
+   via `GET /workspaces/{id}/projects` (match by `id` or `slug`). If
+   no match is found, **auto-create it** rather than aborting:
+   1. Resolve a repo name to use as the project name. Prefer the
+      current GitHub repo's name from
+      `gh repo view --json name -q .name` (run from `$REPO_ROOT`);
+      fall back to `basename "$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"`
+      if `gh` fails or there is no GitHub remote.
+   2. Resolve `repoUrl` from
+      `gh repo view --json url -q .url` if available; otherwise omit.
+   3. `POST /workspaces/{workspaceId}/projects` with
+      `{ name: "<repo-name>", slug: "<kebab-repo-name>", color: "#6366f1", repoUrl?: "<url>" }`.
+      Honor Planbooq's constraints (`slug` is lowercase alphanumeric
+      + hyphens, `color` is `#rrggbb`).
+   4. Cache the new `$PROJECT_ID` and continue. Print one line:
+      `Created Planbooq project "<name>" (<id>) in workspace <slug>.`
+   If `--project` is **not** set (i.e. process-all-projects mode),
+   skip auto-creation entirely — the user did not ask for a specific
+   project.
 5. **Statuses cached.** `GET /workspaces/{id}/statuses` →
    `name → id` map. Verify `Planning`, `Building`, `Review` are all
    present (case-insensitive). Abort if `Review` is missing.
