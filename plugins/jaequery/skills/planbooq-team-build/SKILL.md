@@ -63,13 +63,13 @@ stop early if `--dry-run` is set or preflight (§1) fails.
 **All Planbooq interactions in this skill go through the Planbooq
 REST API**, called with `curl`. No MCP, no SDK.
 
-- **Base URL.** Read from `$PLANBOOQ_API_BASE` (e.g.
-  `https://planbooq.example.com/api/v1`). If unset, abort with a
-  one-liner asking the user to `export PLANBOOQ_API_BASE=…` (and
-  add it to their shell profile / `~/.claude.json` env block).
+- **Base URL.** Hard-coded to `http://localhost:3636/api/v1`.
+  Planbooq runs locally for every developer; there is no remote
+  deployment to configure. Do **not** read this from an env var.
 - **Auth.** `Authorization: Bearer $PLANBOOQ_API_TOKEN` (a
   `pbq_live_…` key from Settings → API Keys). If unset, abort with
-  the same shape of message.
+  a one-liner asking the user to `export PLANBOOQ_API_TOKEN=…`
+  (or add it to `~/.claude.json`'s `env` block).
 - **Headers.** `Content-Type: application/json` on every request.
 - **Response envelope.** Every response is
   `{ "ok": true, "data": … }` on success, or
@@ -86,11 +86,11 @@ PBQ() {
       -H "Authorization: Bearer $PLANBOOQ_API_TOKEN" \
       -H "Content-Type: application/json" \
       --data "$body" \
-      "$PLANBOOQ_API_BASE$path"
+      "http://localhost:3636/api/v1$path"
   else
     curl -fsS -X "$method" \
       -H "Authorization: Bearer $PLANBOOQ_API_TOKEN" \
-      "$PLANBOOQ_API_BASE$path"
+      "http://localhost:3636/api/v1$path"
   fi
 }
 ```
@@ -153,10 +153,15 @@ named "Reviewing" before re-running.` Other missing columns (`QA`,
 
 ## 1. Preflight
 
-1. **Env vars set.** Both `PLANBOOQ_API_BASE` and `PLANBOOQ_API_TOKEN`
-   must be exported. If either is missing, stop and tell the user how
-   to set them (and that the values can also live in `~/.claude.json`'s
-   `env` block).
+1. **Token set.** `PLANBOOQ_API_TOKEN` must be exported (the base URL
+   is hard-coded to `http://localhost:3636/api/v1`, so no env var is
+   needed for it). If the token is missing, stop and tell the user
+   how to set it (it can also live in `~/.claude.json`'s `env` block).
+   **Server reachable.** Sanity-check that the local Planbooq is
+   running with `curl -fsS http://localhost:3636/api/v1/workspaces -H "Authorization: Bearer $PLANBOOQ_API_TOKEN"`;
+   on connection refused, abort with `Planbooq is not running on
+   localhost:3636 — start it (e.g. \`pnpm dev\` in the planbooq repo)
+   and re-run.`
 2. **API reachable.** `PBQ GET /workspaces | jq -e '.ok'` must
    succeed. A 401 means the token is wrong; a 403 on a workspace
    means the key is workspace-scoped to a different workspace —
@@ -487,7 +492,7 @@ persist for manual debugging.
   rule: **PR opened → `Reviewing` (any verdict); no PR → back to
   `Todo`**.
 - **All Planbooq reads/writes go through the REST API at
-  `$PLANBOOQ_API_BASE` with `Bearer $PLANBOOQ_API_TOKEN`.** No MCP,
+  `http://localhost:3636/api/v1` with `Bearer $PLANBOOQ_API_TOKEN`.** No MCP,
   no SDK, no scraping the web UI. Always check `.ok` on the response
   envelope before reading `.data`.
 - Always resolve IDs via list endpoints before creating — never
