@@ -157,9 +157,23 @@ named "Review" before re-running.` Other missing columns (`QA`,
 
 ## 1. Preflight
 
-1. **Token set.** `PLANBOOQ_API_KEY` must be available (the base URL
-   is hard-coded to `http://localhost:3636/api/v1`, so no env var is
-   needed for it). If `$PLANBOOQ_API_KEY` is empty:
+1. **Token resolution.** Resolve `PLANBOOQ_API_KEY` in this order —
+   **only prompt if all three sources are empty**:
+   1. `$PLANBOOQ_API_KEY` already in the current shell env.
+   2. **`~/.claude.json` `env` block** (Claude Code may not have
+      injected it into this shell yet — read the file directly):
+      ```bash
+      if [ -z "$PLANBOOQ_API_KEY" ] && [ -f ~/.claude.json ]; then
+        PLANBOOQ_API_KEY=$(jq -r '.env.PLANBOOQ_API_KEY // empty' ~/.claude.json 2>/dev/null)
+        export PLANBOOQ_API_KEY
+      fi
+      ```
+   3. `~/.claude.json` `mcpServers.*.env.PLANBOOQ_API_KEY` (legacy
+      placement) — same `jq` pattern with
+      `.mcpServers // {} | to_entries[] | .value.env.PLANBOOQ_API_KEY // empty`
+      and take the first non-empty hit.
+
+   If still empty after all three checks, **only then** prompt:
    1. **Prompt once** via `AskUserQuestion` — single free-text question:
       `"Enter your Planbooq API token (pbq_live_… from Settings → API
       Keys). I'll save it to ~/.claude.json so you're never prompted
