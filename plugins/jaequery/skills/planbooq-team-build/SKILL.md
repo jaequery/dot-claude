@@ -69,9 +69,9 @@ REST API**, called with `curl`. No MCP, no SDK.
 - **Auth.** `Authorization: Bearer $PLANBOOQ_API_KEY` (a
   `pbq_live_…` key from Settings → API Keys). If unset, **prompt
   the user once via `AskUserQuestion`** for the key, then persist
-  it to `~/.claude.json`'s `env` block so future runs (and other
-  Claude Code sessions) never re-prompt. See §1 step 1 for the
-  exact persistence flow.
+  it to `~/.planbooq/.env` so future runs (and other Claude Code
+  sessions) never re-prompt. See §1 step 1 for the exact
+  persistence flow.
 - **Headers.** `Content-Type: application/json` on every request.
 - **Response envelope.** Every response is
   `{ "ok": true, "data": … }` on success, or
@@ -158,45 +158,51 @@ named "Review" before re-running.` Other missing columns (`QA`,
 ## 1. Preflight
 
 1. **Token resolution.** Resolve `PLANBOOQ_API_KEY` in this order —
-   **only prompt if all three sources are empty**:
+   **only prompt if all sources are empty**:
    1. `$PLANBOOQ_API_KEY` already in the current shell env.
-   2. **`~/.claude.json` `env` block** (Claude Code may not have
-      injected it into this shell yet — read the file directly):
+   2. **`~/.planbooq/.env`** (preferred location — a plain dotenv
+      file). Source it directly:
+      ```bash
+      if [ -z "$PLANBOOQ_API_KEY" ] && [ -f ~/.planbooq/.env ]; then
+        set -a; . ~/.planbooq/.env; set +a
+      fi
+      ```
+   3. **`~/.claude.json` `env` block** (legacy location — older
+      installs persisted the key here). Read directly via `jq`:
       ```bash
       if [ -z "$PLANBOOQ_API_KEY" ] && [ -f ~/.claude.json ]; then
         PLANBOOQ_API_KEY=$(jq -r '.env.PLANBOOQ_API_KEY // empty' ~/.claude.json 2>/dev/null)
         export PLANBOOQ_API_KEY
       fi
       ```
-   3. `~/.claude.json` `mcpServers.*.env.PLANBOOQ_API_KEY` (legacy
-      placement) — same `jq` pattern with
+   4. `~/.claude.json` `mcpServers.*.env.PLANBOOQ_API_KEY` (oldest
+      legacy placement) — same `jq` pattern with
       `.mcpServers // {} | to_entries[] | .value.env.PLANBOOQ_API_KEY // empty`
       and take the first non-empty hit.
 
-   If still empty after all three checks, **only then** prompt:
+   If still empty after all checks, **only then** prompt:
    1. **Prompt once** via `AskUserQuestion` — single free-text question:
       `"Enter your Planbooq API token (pbq_live_… from Settings → API
-      Keys). I'll save it to ~/.claude.json so you're never prompted
+      Keys). I'll save it to ~/.planbooq/.env so you're never prompted
       again."`
    2. **Validate** the answer is non-empty and starts with `pbq_` (warn
       but accept if the prefix differs — the user may be on a custom
       build). On empty, abort.
-   3. **Persist to `~/.claude.json`** at the user level by merging into
-      the top-level `env` object (creating it if missing). Use `jq` to
-      keep the file valid:
+   3. **Persist to `~/.planbooq/.env`** (create the directory if
+      missing, lock down permissions):
       ```bash
-      tmp=$(mktemp) && jq --arg k "$ANSWERED_TOKEN" \
-        '.env = ((.env // {}) + {PLANBOOQ_API_KEY: $k})' \
-        ~/.claude.json > "$tmp" && mv "$tmp" ~/.claude.json
+      mkdir -p ~/.planbooq && chmod 700 ~/.planbooq
+      umask 077
+      printf 'PLANBOOQ_API_KEY=%s\n' "$ANSWERED_TOKEN" > ~/.planbooq/.env
+      chmod 600 ~/.planbooq/.env
       ```
-      If `~/.claude.json` does not exist, create it with
-      `{"env":{"PLANBOOQ_API_KEY":"<key>"}}`. Never echo the token
-      value back to the terminal in plain text after saving.
+      Never echo the token value back to the terminal in plain text
+      after saving.
    4. **Export for the current run** so the rest of this skill works
       without a Claude Code restart: `export PLANBOOQ_API_KEY="<key>"`.
    5. Print one line confirming where it was saved
-      (`Saved PLANBOOQ_API_KEY to ~/.claude.json (env block).
-      Future sessions will pick it up automatically.`) and continue.
+      (`Saved PLANBOOQ_API_KEY to ~/.planbooq/.env. Future sessions
+      will pick it up automatically.`) and continue.
 
    **Server reachable.** Sanity-check that the local Planbooq is
    running with `curl -fsS http://localhost:3636/api/v1/workspaces -H "Authorization: Bearer $PLANBOOQ_API_KEY"`;
