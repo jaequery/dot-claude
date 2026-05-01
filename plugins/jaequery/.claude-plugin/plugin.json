@@ -1,6 +1,6 @@
 {
   "name": "jaequery",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "description": "Jae Lee's full arsenal: 23 slash-command skills (startup planning, team-led builds, parallel design variants, Linear + GitHub-Issues + Planbooq backlog burndown, design ticket flow, code review, SEO, Reddit marketing, git audit, diff viewer, Cursor-style runtime debug-trace) plus 167 specialist subagents across engineering, design, product, marketing, paid-media, sales, game-dev, and specialized domains.",
   "author": {
     "name": "Jae Lee",

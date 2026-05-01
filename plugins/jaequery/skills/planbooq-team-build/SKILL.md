@@ -63,9 +63,12 @@ stop early if `--dry-run` is set or preflight (§1) fails.
 **All Planbooq interactions in this skill go through the Planbooq
 REST API**, called with `curl`. No MCP, no SDK.
 
-- **Base URL.** Hard-coded to `http://localhost:3636/api/v1`.
-  Planbooq runs locally for every developer; there is no remote
-  deployment to configure. Do **not** read this from an env var.
+- **Base URL.** Read from `$PLANBOOQ_BASE_URL` (sourced from
+  `~/.planbooq/.env` like the API key). Default if unset:
+  `https://planbooq.vercel.app`. The skill always appends `/api/v1`,
+  so the env var should be the host root only (e.g.
+  `https://planbooq.vercel.app`, `http://localhost:3636`, or any
+  custom deployment). Set once and forget — see §1 step 1.
 - **Auth.** `Authorization: Bearer $PLANBOOQ_API_KEY` (a
   `pbq_live_…` key from Settings → API Keys). If unset, **prompt
   the user once via `AskUserQuestion`** for the key, then persist
@@ -88,11 +91,11 @@ PBQ() {
       -H "Authorization: Bearer $PLANBOOQ_API_KEY" \
       -H "Content-Type: application/json" \
       --data "$body" \
-      "http://localhost:3636/api/v1$path"
+      "${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1$path"
   else
     curl -fsS -X "$method" \
       -H "Authorization: Bearer $PLANBOOQ_API_KEY" \
-      "http://localhost:3636/api/v1$path"
+      "${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1$path"
   fi
 }
 ```
@@ -157,8 +160,12 @@ named "Review" before re-running.` Other missing columns (`QA`,
 
 ## 1. Preflight
 
-1. **Token resolution.** Resolve `PLANBOOQ_API_KEY` in this order —
-   **only prompt if all sources are empty**:
+1. **Token + base URL resolution.** Sourcing `~/.planbooq/.env` (step
+   2 below) populates **both** `PLANBOOQ_API_KEY` and the optional
+   `PLANBOOQ_BASE_URL` (host root only — the skill appends `/api/v1`).
+   If `PLANBOOQ_BASE_URL` is unset after sourcing, default to
+   `https://planbooq.vercel.app`. Resolve `PLANBOOQ_API_KEY` in this
+   order — **only prompt if all sources are empty**:
    1. `$PLANBOOQ_API_KEY` already in the current shell env.
    2. **`~/.planbooq/.env`** (preferred location — a plain dotenv
       file). Source it directly:
@@ -204,11 +211,9 @@ named "Review" before re-running.` Other missing columns (`QA`,
       (`Saved PLANBOOQ_API_KEY to ~/.planbooq/.env. Future sessions
       will pick it up automatically.`) and continue.
 
-   **Server reachable.** Sanity-check that the local Planbooq is
-   running with `curl -fsS http://localhost:3636/api/v1/workspaces -H "Authorization: Bearer $PLANBOOQ_API_KEY"`;
-   on connection refused, abort with `Planbooq is not running on
-   localhost:3636 — start it (e.g. \`pnpm dev\` in the planbooq repo)
-   and re-run.`
+   **Server reachable.** Sanity-check Planbooq is reachable with
+   `curl -fsS "${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1/workspaces" -H "Authorization: Bearer $PLANBOOQ_API_KEY"`;
+   on network failure, abort with `Planbooq (${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}) is unreachable — check your network (or PLANBOOQ_BASE_URL in ~/.planbooq/.env) and re-run.`
 2. **API reachable.** `PBQ GET /workspaces | jq -e '.ok'` must
    succeed. A 401 means the token is wrong; a 403 on a workspace
    means the key is workspace-scoped to a different workspace —
@@ -556,7 +561,8 @@ persist for manual debugging.
   rule: **PR opened → `Review` (any verdict); no PR → back to
   `Planning`**.
 - **All Planbooq reads/writes go through the REST API at
-  `http://localhost:3636/api/v1` with `Bearer $PLANBOOQ_API_KEY`.** No MCP,
+  `${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1` with
+  `Bearer $PLANBOOQ_API_KEY`.** No MCP,
   no SDK, no scraping the web UI. Always check `.ok` on the response
   envelope before reading `.data`.
 - Always resolve IDs via list endpoints before creating — never
