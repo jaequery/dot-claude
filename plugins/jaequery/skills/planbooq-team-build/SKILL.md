@@ -369,6 +369,34 @@ merge is traceable. Planbooq does not auto-close from a magic word,
 so this is purely a human-readable backlink — but it is required.
 
 ---
+Verification bar for this build (non-negotiable — the ticket is not
+done until you've proven the change does what was asked):
+- **Restate the ticket's acceptance criteria in your own words before
+  coding.** If the ticket has no explicit criteria, derive 1–5
+  falsifiable checks from the title + description and write them into
+  the PR body under a `## Verification` section. Each check is a
+  concrete observable behavior, not a vague "it works".
+- **Map every check to evidence.** For each acceptance check, record
+  HOW you confirmed it: a unit/integration test name, a curl/CLI
+  command + expected output, a screenshot, a log line, or an
+  end-to-end click-through. "Looks right" is not evidence.
+- **Run the verification before requesting review.** Execute the
+  tests/commands you listed; paste the actual output (or a trimmed
+  excerpt) into the PR body next to each check. If a check fails,
+  fix the code — do not reword the check.
+- **For UI tickets**, the §3d.5 screenshots/walkthrough are part of
+  the evidence, not a substitute for it. Still list the user-visible
+  behavior change in the PR body and confirm it via the screenshots.
+- **For bug fixes**, add a regression test that fails on `main` and
+  passes on this branch, OR document why a test isn't feasible
+  (e.g. external system, race condition) and replace it with a
+  manual repro + fix-confirmed transcript.
+- **If you cannot verify a check** (missing test setup, no staging
+  env, requires production data), say so explicitly in the PR body
+  under `## Verification — unverified` with the reason. Never
+  silently skip.
+
+---
 Clean-code bar for this build (non-negotiable, enforce in the §5 code review):
 - Reuse existing patterns and helpers; do not duplicate logic that already
   lives in this codebase. Grep before writing.
@@ -636,7 +664,12 @@ the ticket belongs in `Review`.
   contains the URL as a fallback). Comment body: PR URL + one-line summary + verdict
   (APPROVED / ESCALATED / FAILED). For non-APPROVED verdicts, also
   include the blocker summary so a human can pick up where the loop
-  stopped. If §3d.5 produced screenshots, append a `### Screenshots`
+  stopped. **Always append a `### Verification` section** mirroring
+  the PR body's verification checks: each acceptance check on its own
+  bullet with the evidence (test name, command output excerpt,
+  screenshot ref, or `unverified — <reason>`). This is how the human
+  reviewer in the `Review` column knows what was actually confirmed
+  vs. assumed. If §3d.5 produced screenshots, append a `### Screenshots`
   section embedding each as `![<label>]($RAW_URL)` in capture order.
   If §3d.5 produced a walkthrough video, append a `### Walkthrough`
   section with `[walkthrough.mp4]($RAW_URL)` followed by the bare
