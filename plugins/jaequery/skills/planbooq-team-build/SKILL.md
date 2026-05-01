@@ -116,7 +116,7 @@ envelope check.)
 | List tickets                    | `GET /tickets?projectId=&statusId=&assigneeId=&includeArchived=&cursor=&limit=` |
 | Get ticket                      | `GET /tickets/{ticketId}`                                        |
 | Create ticket                   | `POST /tickets` — `{ projectId, statusId, title, description? }` |
-| Update ticket                   | `PATCH /tickets/{ticketId}` — any of `{ title, description, priority, assigneeId, dueDate, labelIds }` |
+| Update ticket                   | `PATCH /tickets/{ticketId}` — any of `{ title, description, priority, assigneeId, dueDate, labelIds, prUrl }` |
 | Move ticket between columns     | `POST /tickets/{ticketId}/move` — `{ toStatusId, beforeTicketId?, afterTicketId? }` |
 | Add comment                     | `POST /tickets/{ticketId}/comments` — `{ body }`                 |
 
@@ -500,10 +500,17 @@ the ticket belongs in `Review`.
   team-build still pushed):**
   ```bash
   PBQ POST "/tickets/$TICKET_ID/comments" "$(jq -Rs '{body:.}' < /tmp/pbq-done-$TICKET_ID.md)"
+  PBQ PATCH "/tickets/$TICKET_ID" \
+    "$(jq -nc --arg u "$PR_URL" '{prUrl:$u}')"
   PBQ POST "/tickets/$TICKET_ID/move" \
     "$(jq -nc --arg s "$STATUS_REVIEW_ID" '{toStatusId:$s}')"
   ```
-  Comment body: PR URL + one-line summary + verdict
+  The `PATCH` call sets the ticket's native `prUrl` field so the PR
+  shows up in the ticket's "Add PR link…" slot in the UI — not just
+  buried in the comment thread. **This is required**, not optional;
+  the comment alone does not link the ticket to the PR. Best-effort:
+  on failure, log a warning and continue (the comment already
+  contains the URL as a fallback). Comment body: PR URL + one-line summary + verdict
   (APPROVED / ESCALATED / FAILED). For non-APPROVED verdicts, also
   include the blocker summary so a human can pick up where the loop
   stopped. If §3d.5 produced screenshots, append a `### Screenshots`
