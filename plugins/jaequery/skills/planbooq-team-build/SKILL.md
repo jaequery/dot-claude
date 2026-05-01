@@ -1,7 +1,7 @@
 ---
 name: planbooq-team-build
 description: >
-  Pull every Planbooq ticket in the "Planning" kanban column (optionally
+  Pull every Planbooq ticket in the "Todo" kanban column (optionally
   scoped to a workspace, project, or assignee), then run /team-build
   on each ticket independently — one isolated worktree, one branch,
   one PR per ticket. No giant monolithic PR. Each build is instructed
@@ -13,10 +13,10 @@ description: >
   Planbooq backlog with one clean PR per issue.
 ---
 
-# /planbooq-team-build — Burn down a Planbooq "Planning" queue, one clean PR per ticket
+# /planbooq-team-build — Burn down a Planbooq "Todo" queue, one clean PR per ticket
 
 You are a backlog runner. For every open Planbooq ticket whose status
-is **Planning**, you launch `/team-build` against that ticket's
+is **Todo**, you launch `/team-build` against that ticket's
 description and ship a **separate PR** per ticket. Never bundle
 multiple tickets into one PR. Every build must meet the clean-code
 bar in §3a. Status transitions go to Planbooq's native kanban column
@@ -27,7 +27,7 @@ via the REST API — not labels, not comments.
 `/planbooq-team-build [task description] [flags]`.
 
 **Positional arg (optional).** If a free-form task description is
-passed, **create the ticket on the fly first** (in `Planning` on the
+passed, **create the ticket on the fly first** (in `Todo` on the
 target project), then proceed with normal queue processing — the new
 ticket is included in this run's queue. Title = first line of the
 description (≤200 chars per Planbooq limit), description = the
@@ -50,7 +50,7 @@ Optional flags:
 - `--dry-run` — list tickets that would be processed and stop.
 
 **No confirmation prompt. Ever.** If invoked with no flags, just
-start — defaults are: open Planning tickets in the resolved workspace,
+start — defaults are: open Todo tickets in the resolved workspace,
 up to 10, sequential, base = `main`. Print the resolved settings +
 ticket queue, then **immediately proceed to §1 preflight and §2
 ticket processing in the same response, without asking the user
@@ -138,24 +138,26 @@ IDs are looked up once at preflight via `GET /workspaces/{id}/statuses`
 and cached:
 
 ```
-Planning → Building → Review
+Todo → Building → Review
 ```
 
-Planbooq's default board has five columns:
-`Backlog → Planning → Building → Review → Shipping`. Humans drive
-the ends (`Backlog` triage → `Planning`, `Review` → `Shipping`); this
-skill drives the middle three. It never writes `Backlog` or `Shipping`.
+Planbooq's default board has six columns:
+`Backlog → Planning → Todo → Building → Review → Shipping`. Humans
+drive the early stages (`Backlog` triage → `Planning` → `Todo` =
+ready-for-work) and the final stage (`Review` → `Shipping`); this
+skill picks up from `Todo` and drives `Todo → Building → Review`. It
+never writes `Backlog`, `Planning`, or `Shipping`.
 
-`Review` is **mandatory**. If the workspace's statuses list lacks
-a column named `Review` (case-insensitive), abort the run with
-`Planbooq workspace <slug> has no 'Review' status — add a column
-named "Review" before re-running.` Other missing columns (`QA`,
+`Todo` and `Review` are **mandatory**. If the workspace's statuses
+list lacks either column (case-insensitive), abort the run with
+`Planbooq workspace <slug> has no '<name>' status — add a column
+named "<name>" before re-running.` Other missing columns (`QA`,
 `Done`) downgrade to a warning since this skill does not write them.
 
 **Caching.** At preflight, resolve once and reuse for the whole run:
 - `$WORKSPACE_ID`
 - `$PROJECT_ID` (if `--project` is set; else process all projects)
-- The `status-name → status-id` map: `$STATUS_PLANNING_ID`,
+- The `status-name → status-id` map: `$STATUS_TODO_ID`,
   `$STATUS_BUILDING_ID`, `$STATUS_REVIEW_ID`.
 
 ## 1. Preflight
@@ -242,8 +244,10 @@ named "Review" before re-running.` Other missing columns (`QA`,
    skip auto-creation entirely — the user did not ask for a specific
    project.
 5. **Statuses cached.** `GET /workspaces/{id}/statuses` →
-   `name → id` map. Verify `Planning`, `Building`, `Review` are all
-   present (case-insensitive). Abort if `Review` is missing.
+   `name → id` map. Verify `Todo`, `Building`, `Review` are all
+   present (case-insensitive). Abort if `Todo` or `Review` is missing
+   (`Planbooq workspace <slug> has no '<name>' status — add a column
+   named "<name>" before re-running.`).
 6. **Repo state.** `git status --porcelain` must be empty, or
    surfaced and confirmed by the user.
 7. **`gh` available.** `gh auth status` must succeed — `/team-build`
@@ -251,10 +255,10 @@ named "Review" before re-running.` Other missing columns (`QA`,
 8. **`/team-build` reachable.** This skill invokes it via the Skill
    tool; if not listed as available, abort.
 
-## 2. Fetch the Planning queue
+## 2. Fetch the Todo queue
 
 ```bash
-PBQ GET "/tickets?statusId=$STATUS_PLANNING_ID&limit=${LIMIT:-10}${PROJECT_ID:+&projectId=$PROJECT_ID}${ASSIGNEE_ID:+&assigneeId=$ASSIGNEE_ID}" \
+PBQ GET "/tickets?statusId=$STATUS_TODO_ID&limit=${LIMIT:-10}${PROJECT_ID:+&projectId=$PROJECT_ID}${ASSIGNEE_ID:+&assigneeId=$ASSIGNEE_ID}" \
   | jq '.data'
 ```
 
@@ -275,7 +279,7 @@ Sort: by `priority` (`URGENT` → `HIGH` → `MEDIUM` → `LOW` →
 numbered table:
 
 ```
-# Planbooq queue (N tickets) — workspace: $WORKSPACE_SLUG  status: Planning
+# Planbooq queue (N tickets) — workspace: $WORKSPACE_SLUG  status: Todo
 1. PBQ-123  [HIGH]  "Add OAuth login"          (@alice)  project: web
 2. PBQ-130  [MED]   "Fix invoice rounding"     (@bob)    project: billing
 ```
@@ -340,7 +344,7 @@ git show-ref --verify --quiet "refs/heads/$RESOLVED" \
 If neither, **STOP this ticket**:
 - Add a comment via
   `PBQ POST /tickets/$TICKET_ID/comments '{"body":"team-build skipped: target branch \`'"$RESOLVED"'\` does not exist locally or on origin."}'`.
-- Leave the ticket status as `Planning` (don't promote to `Building`).
+- Leave the ticket status as `Todo` (don't promote to `Building`).
 - Record verdict `SKIPPED` in the results table and continue.
 
 Print both resolutions per ticket, e.g.:
@@ -511,10 +515,10 @@ the ticket belongs in `Review`.
   ```bash
   PBQ POST "/tickets/$TICKET_ID/comments" "$(jq -Rs '{body:.}' < /tmp/pbq-done-$TICKET_ID.md)"
   PBQ POST "/tickets/$TICKET_ID/move" \
-    "$(jq -nc --arg s "$STATUS_PLANNING_ID" '{toStatusId:$s}')"
+    "$(jq -nc --arg s "$STATUS_TODO_ID" '{toStatusId:$s}')"
   ```
   Comment body: blocker summary, worktree path, remediation notes.
-  Ticket returns to the `Planning` column. Never archive.
+  Ticket returns to the `Todo` column. Never archive.
 
 ### 3f. Decide whether to continue
 
@@ -535,7 +539,7 @@ warn the user about shared `gh` / Planbooq rate limits but do not cap.
 
 ```
 ## /planbooq-team-build — summary
-Workspace: $WORKSPACE_SLUG   Project filter: ${PROJECT_SLUG:-all}   Status filter: Planning
+Workspace: $WORKSPACE_SLUG   Project filter: ${PROJECT_SLUG:-all}   Status filter: Todo
 Processed: N tickets
 
 | Ticket   | Verdict   | PR                              | Rounds |
@@ -573,7 +577,7 @@ persist for manual debugging.
 - Always update the ticket (comment + status `move`) after each
   one. Never leave a ticket stranded in `Building`. Transition
   rule: **PR opened → `Review` (any verdict); no PR → back to
-  `Planning`**.
+  `Todo`**.
 - **All Planbooq reads/writes go through the REST API at
   `${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1` with
   `Bearer $PLANBOOQ_API_KEY`.** No MCP,
