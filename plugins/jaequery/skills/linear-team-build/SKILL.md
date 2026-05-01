@@ -189,6 +189,47 @@ If neither, **STOP this ticket** (do not silently fall back to `main`):
 Print both resolutions per ticket, e.g.:
 `ENG-123 → working=jaequery/eng-123-add-oauth-login (from Linear branchName), target=feature/auth (from description directive)`
 
+### 3a-img. Hydrate description images so the team can actually see them
+
+Linear stores embedded images as `![alt](https://uploads.linear.app/...)`
+URLs in `description` and as entries under `attachments.nodes[]`. These
+URLs are **auth-gated** — passing the URL through as text gives the
+Team Lead nothing useful. Fetch the bytes locally so Claude's `Read`
+tool can vision them.
+
+1. **Get the auth token.** `linear auth token` prints the OAuth token
+   for the default workspace (or the one passed via `--workspace`):
+   ```bash
+   LINEAR_TOKEN=$(linear auth token --workspace "$WORKSPACE" 2>/dev/null \
+     || linear auth token 2>/dev/null)
+   ```
+   If empty, log a warning, skip image hydration, and continue —
+   never block the build on a missing token.
+2. **Extract URLs.** Two sources, dedup the union:
+   - From `$DESCRIPTION`: every `https://uploads.linear.app/...` URL
+     inside `![…](…)` markdown image syntax.
+     ```bash
+     IMG_URLS=$(printf '%s' "$DESCRIPTION" \
+       | grep -oE '!\[[^]]*\]\(https://uploads\.linear\.app/[^)]+\)' \
+       | grep -oE 'https://uploads\.linear\.app/[^)]+')
+     ```
+   - From the issue JSON's `attachments.nodes[].url` entries whose URL
+     host is `uploads.linear.app` OR whose `metadata.contentType`
+     starts with `image/`.
+3. **Download.** For each URL, `curl -fsSL -H "Authorization: Bearer
+   $LINEAR_TOKEN" -o /tmp/ltb-img-$IDENT-<n>.<ext>` where `<ext>` is
+   guessed from the `Content-Type` response header (default `.png`).
+   On 4xx/5xx, log the failure for that URL and continue with the
+   rest — partial coverage beats none. Cap at 8 images per ticket to
+   keep the prompt manageable.
+4. **Record a manifest.** Write `/tmp/ltb-img-$IDENT-manifest.txt`
+   with one line per successful download: `<local-path>  <original-url>`.
+   This lets the Team Lead correlate the downloaded file with the
+   reference in `$DESCRIPTION`.
+
+Pass the resulting `IMAGES_BLOCK` into the §3a prompt body — see the
+`Reference images` section in the template.
+
 ### 3a. Build the team-build invocation
 
 Hand `/team-build` exactly this prompt body (one ticket only):
@@ -200,6 +241,20 @@ Source: $URL
 Priority: $PRIORITY  Assignee: $ASSIGNEE  Labels: $LABELS
 
 $DESCRIPTION
+
+$IMAGES_BLOCK
+# When images were hydrated in §3a-img, $IMAGES_BLOCK expands to:
+#
+# ---
+# Reference images (downloaded from the Linear ticket — Read these
+# files with the Read tool before designing the change; they are
+# what the requester actually showed):
+# - /tmp/ltb-img-$IDENT-1.png  (originally: <linear-upload-url>)
+# - /tmp/ltb-img-$IDENT-2.png  (originally: <linear-upload-url>)
+# ...
+#
+# When no images were attached or hydration failed, $IMAGES_BLOCK is
+# empty (no header line).
 
 ---
 Clean-code bar for this build (non-negotiable, enforce in the §5 code review):
