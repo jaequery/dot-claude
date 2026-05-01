@@ -475,19 +475,142 @@ After it returns, verify isolation:
 Record: PR URL, PR number, branch name, worktree path, verdict,
 rounds run.
 
-### 3d.5. Screenshot capture (UX/design tickets only)
+### 3d.5. Screenshot + video capture (UX/design tickets only)
 
-Same logic as `/github-team-build` §3d.5 — only run when verdict is
-**APPROVED** AND the ticket touches the UI (frontend-shaped diff,
-design label, or UI keywords in title/description). Capture three
-shots (desktop 1440×900, mobile 390×844, desktop-after-interaction)
-via Playwright MCP after booting the project's dev server in a fresh
-read-only worktree. Commit them to the PR branch under
-`.planbooq-team-build/shots/<identifier>/` and reference via
-`raw.githubusercontent.com` URLs in the §3e comment. Failure modes
-(no dev server, capture error, push rejected) downgrade to a single
-`_Screenshots not captured: <reason>_` line — never abort the
-ticket and never fabricate an image.
+Same trigger logic as `/github-team-build` §3d.5 — only run when
+verdict is **APPROVED** AND the ticket touches the UI (frontend-shaped
+diff, design label, or UI keywords in title/description). Boot the
+project's dev server once in a fresh read-only worktree and reuse it
+for both passes below.
+
+**Pass A — Screenshots (Playwright MCP).** Capture three stills via
+`mcp__playwright__*`: desktop 1440×900, mobile 390×844, and one
+desktop-after-interaction shot (click the most ticket-relevant CTA
+before snapping). Save as PNG.
+
+**Pass B — Video walkthrough (native Playwright, not MCP).** Spawn a
+short Node script via Bash that drives a real `recordVideo` session
+so you get a true `.webm` recording, not a slideshow. The MCP surface
+does not expose `recordVideo`, so this is the only way to get a real
+video. Inline script lives at
+`.planbooq-team-build/cap/<identifier>/record.mjs`; use `npx -y
+playwright@latest` so projects without Playwright installed still
+work. Skeleton:
+
+```js
+// record.mjs — deterministic default walkthrough.
+// No LLM-authored steps required: derives a sensible click/scroll
+// sequence from the DOM + the diff. Always produces a usable video.
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+
+const url      = process.env.WALKTHROUGH_URL;
+const out      = process.env.OUT_DIR;
+// Selectors to prioritise hovering — passed in as a JSON array of
+// CSS selectors derived from the diff (see "Selector extraction"
+// below). Falls back to an empty array if not provided.
+const targets  = JSON.parse(process.env.DIFF_SELECTORS || '[]');
+
+const browser = await chromium.launch();
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  recordVideo: { dir: out, size: { width: 1440, height: 900 } },
+});
+const page = await ctx.newPage();
+
+const wait = (ms) => page.waitForTimeout(ms);
+const safe = async (fn) => { try { await fn(); } catch {} };
+
+await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+await wait(800);
+
+// 1. Hover each diff'd selector that actually exists on the page.
+for (const sel of targets.slice(0, 4)) {
+  await safe(async () => {
+    const el = await page.locator(sel).first();
+    if (await el.count()) {
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 });
+      await el.hover({ timeout: 2000 });
+      await wait(500);
+    }
+  });
+}
+
+// 2. Generic scroll pass — top → mid → bottom → top.
+await page.evaluate(() => window.scrollTo({ top: 0 }));
+await wait(400);
+await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'smooth' }));
+await wait(900);
+await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
+await wait(900);
+await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+await wait(700);
+
+// 3. Click the most plausible primary CTA — first non-disabled
+// button or link inside the visible viewport, preferring ones that
+// look like CTAs (filled buttons, links with role=button, etc.).
+await safe(async () => {
+  const cta = page.locator(
+    'button:not([disabled]):visible, [role="button"]:visible, a.btn:visible, a[class*="button"]:visible'
+  ).first();
+  if (await cta.count()) {
+    await cta.scrollIntoViewIfNeeded({ timeout: 1500 });
+    await cta.hover({ timeout: 1500 });
+    await wait(400);
+    await cta.click({ timeout: 2000, trial: false });
+    await wait(1200);
+  }
+});
+
+await ctx.close();
+await browser.close();
+```
+
+**Selector extraction.** Before invoking `record.mjs`, derive
+`DIFF_SELECTORS` from the PR diff so the walkthrough actually visits
+what changed:
+1. `git diff $RESOLVED..$WORKING_BRANCH -- '*.tsx' '*.jsx' '*.vue' '*.svelte' '*.html'`
+2. Grep added/changed lines for `data-testid="…"`, `id="…"`, and
+   `className="…"` (single-token classes that look component-y, e.g.
+   not utility classes like `flex`, `p-4`).
+3. Convert to selectors: `data-testid` → `[data-testid="x"]`,
+   `id` → `#x`, class → `.x`. Cap at the 8 most-frequently-touched.
+4. Pass to the script via `DIFF_SELECTORS=$(jq -c -n --argjson a "$ARRAY" '$a')`.
+
+If the diff is purely backend / non-frontend (no markup files
+touched), `DIFF_SELECTORS=[]` is fine — the generic scroll + CTA
+pass alone still yields a usable walkthrough. If the §3d.5 trigger
+fired but the diff has zero markup files, log
+`_Walkthrough used generic pass — no UI selectors in diff._` to the
+ticket comment so reviewers know the video is general, not
+ticket-specific.
+
+Convert the `.webm` to `.mp4` (better PR/Planbooq render) via
+`ffmpeg -i walkthrough.webm -c:v libx264 -pix_fmt yuv420p -movflags
++faststart walkthrough.mp4` — only if `ffmpeg` is on `PATH`.
+Otherwise keep the `.webm`.
+
+**Commit + reference.** Both stills and the video go to the PR branch
+under `.planbooq-team-build/shots/<identifier>/`. Reference via
+`raw.githubusercontent.com` URLs in the §3e comment — embed stills as
+`![<label>](url)` and the video as a plain markdown link
+`[walkthrough.mp4](url)` (Planbooq won't render `<video>` inline; the
+GitHub PR description renders `.mp4` natively if pasted as a bare
+URL, so include the bare URL once underneath the link).
+
+**Failure modes** (each downgrades, never aborts the ticket):
+- No dev server / port detection failed → skip both passes; emit
+  `_Screenshots not captured: no dev server detected._`
+- Pass A errors → emit `_Screenshots not captured: <reason>._` and
+  still attempt Pass B.
+- Pass B errors (Playwright install fails offline, walkthrough
+  throws, no `ffmpeg`) → keep whatever Pass A produced and emit
+  `_Walkthrough video not captured: <reason>._` Note: `.webm` is a
+  valid fallback when `ffmpeg` is missing — only fail the video pass
+  if Playwright itself errored.
+- Push rejected → emit a single `_Capture artifacts not pushed: <reason>._`
+
+Never fabricate an image or video.
 
 ### 3e. Update the ticket
 
@@ -515,6 +638,10 @@ the ticket belongs in `Review`.
   include the blocker summary so a human can pick up where the loop
   stopped. If §3d.5 produced screenshots, append a `### Screenshots`
   section embedding each as `![<label>]($RAW_URL)` in capture order.
+  If §3d.5 produced a walkthrough video, append a `### Walkthrough`
+  section with `[walkthrough.mp4]($RAW_URL)` followed by the bare
+  URL on its own line (the GitHub PR auto-renders the player from
+  a bare `.mp4` URL).
   Do **not** move the ticket to `QA` or `Done` here.
 - **No PR was opened (environmental abort, target branch missing,
   etc.):**
