@@ -141,12 +141,11 @@ and cached:
 Todo → Building → Review
 ```
 
-Planbooq's default board has six columns:
-`Backlog → Planning → Todo → Building → Review → Shipping`. Humans
-drive the early stages (`Backlog` triage → `Planning` → `Todo` =
-ready-for-work) and the final stage (`Review` → `Shipping`); this
-skill picks up from `Todo` and drives `Todo → Building → Review`. It
-never writes `Backlog`, `Planning`, or `Shipping`.
+Planbooq's default board has five columns:
+`Backlog → Todo → Building → Review → Shipping`. Humans drive
+`Backlog → Todo` triage and `Review → Shipping` promotion; this
+skill picks up from `Todo` and drives `Todo → Building → Review`.
+It never writes `Backlog` or `Shipping`.
 
 `Todo` and `Review` are **mandatory**. If the workspace's statuses
 list lacks either column (case-insensitive), abort the run with
