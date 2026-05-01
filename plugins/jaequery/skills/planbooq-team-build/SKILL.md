@@ -280,8 +280,22 @@ numbered table:
 2. PBQ-130  [MED]   "Fix invoice rounding"     (@bob)    project: billing
 ```
 
-(Use whatever short identifier the ticket exposes — `slug`,
-`number`, or the first 8 chars of `id` — for the leftmost column.)
+Use the canonical Planbooq identifier from the API response field
+`identifier` (e.g. `FRED-0P7JUB`) for both the leftmost column and
+the `$IDENTIFIER` variable used downstream. The Planbooq webhook
+expects this exact form (`<PROJECTSLUG[0:4]>-<TICKETID[-6:]>`,
+uppercased) in the PR body — anything else (e.g. cuid-prefix like
+`pbq-cmomc0af`) breaks PR linking and auto-complete on merge.
+
+If the API response does not include `identifier` (older Planbooq
+deployments), fall back to computing it client-side:
+```bash
+PROJ_PREFIX=$(echo "$PROJECT_SLUG" | cut -c1-4 | tr '[:lower:]' '[:upper:]')
+ID_SUFFIX=$(echo "$TICKET_ID" | tail -c 7 | tr '[:lower:]' '[:upper:]')
+IDENTIFIER="${PROJ_PREFIX}-${ID_SUFFIX}"
+```
+Never use `slug`, `number`, or `pbq-<first-8-chars-of-id>` — those
+won't match the webhook regex.
 
 If `--dry-run`, stop. Otherwise proceed immediately against all N
 tickets — no confirmation prompt.
