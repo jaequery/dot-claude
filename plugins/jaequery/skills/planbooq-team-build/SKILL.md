@@ -488,11 +488,31 @@ Status is already "Building" — §3-state moved it before §3-announce.
      the next run will skip design and go straight to
      `/team-build` with the chosen direction in context.
    ```
-3. **Invoke `/team-design`.** Make exactly one Skill-tool call
-   with `--variants 4` (unless the description specifies a count)
-   and the ticket title + description as the brief. Use a slug
-   based on the ticket identifier so each variant lands on
-   `team-design/<identifier-lower>-<variant-name>`.
+3. **Hydrate description images first**, then **invoke
+   `/team-design`**:
+   - Run §3a-img inline (same recipe, same Bearer-key download
+     loop, same 8-image cap) to populate
+     `/tmp/ptb-img-$IDENTIFIER-N.<ext>`. §3a-img is documented
+     later in the BUILD path but the recipe is path-agnostic — it
+     only needs `$IDENTIFIER`, `$DESCRIPTION`, the ticket comments
+     (optional), and the previews list, all of which are available
+     here.
+   - Build a `--reference` flag list from the manifest:
+     ```bash
+     REF_ARGS=()
+     while IFS=$'\t' read -r local_path orig_url; do
+       REF_ARGS+=(--reference "$local_path")
+     done < /tmp/ptb-img-$IDENTIFIER-manifest.txt 2>/dev/null
+     ```
+     If hydration produced no files, `REF_ARGS` is empty — that's
+     fine, `/team-design` handles zero references.
+   - Make exactly one Skill-tool call to `/team-design` with
+     `--variants 4` (unless the description specifies a count),
+     the `REF_ARGS`, and the ticket title + description as the
+     brief. Use a slug based on the ticket identifier so each
+     variant lands on `team-design/<identifier-lower>-<variant-name>`.
+     Without `--reference`, the variant teams design blind — every
+     hydrated image must be forwarded.
 4. **After it returns** (success path only — failure handling at
    the end of §3-design):
    - **Add label `design-explored`** (per the label helper's
@@ -597,6 +617,87 @@ If neither, **STOP this ticket**:
 Print both resolutions per ticket, e.g.:
 `PBQ-123 → working=pbq-123-add-oauth-login, target=feature/auth (from body directive)`
 
+### 3a-img. Hydrate description images so the team can actually see them
+
+Planbooq stores embedded images and reference media as `Attachment`
+rows; the description / comments reference them as
+`/api/attachments/<id>` (or sometimes a fully-qualified
+`https://<planbooq-host>/api/attachments/<id>`) URLs. These URLs are
+**auth-gated** — the session route 401s on Bearer keys, and the
+team-build agent has no browser session, so passing the URL through
+as text gives the Team Lead nothing useful. Fetch the bytes locally
+through the v1 mirror so Claude's `Read` tool can vision them.
+
+**Pre-step comment (only when images were detected — count > 0):**
+post a brief comment to Planbooq *before* the download loop runs,
+so the human knows what's happening and isn't left staring at a
+quiet ticket while curl chews through several MB:
+
+```markdown
+### 📥 fetching reference images
+
+Found $N image(s) in the description / comments. Downloading them
+locally so the build team can actually see what was attached
+(Planbooq's `/api/attachments/<id>` URLs are auth-gated; the agent
+can't render them in-place). I'll start work as soon as this
+finishes.
+```
+
+If $N is 0, skip the comment (and skip §3a-img entirely).
+
+1. **Resolve the attachment host.** The image URL `<host>` is
+   `${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}` — same env
+   var §1 already resolved. Bare paths like `/api/attachments/<id>`
+   are concatenated against that host; absolute URLs to a *different*
+   host are passed through unchanged (they may be public CDN images
+   that don't need hydration, in which case the curl below will
+   download them anonymously — acceptable).
+2. **Extract attachment IDs.** Three sources, dedup the union of
+   resolved IDs:
+   - From `$DESCRIPTION`: every `/api/attachments/<id>` reference
+     inside `![…](…)` markdown image syntax OR bare in the text:
+     ```bash
+     IMG_IDS=$(printf '%s' "$DESCRIPTION" \
+       | grep -oE '/api/attachments/[A-Za-z0-9_-]+' \
+       | awk -F/ '{print $NF}' | sort -u)
+     ```
+   - From the comments thread (`GET /tickets/$TICKET_ID/comments`
+     if you've already loaded it; otherwise skip — comments are
+     optional context): same regex against each comment `body`.
+   - From the ticket's previews list:
+     `PBQ GET "/tickets/$TICKET_ID/previews"` → for each entry,
+     `data[].attachmentId`. Previews are always image/video by
+     construction, so include all of them.
+3. **Download.** For each `<id>`, hit the v1 endpoint with the
+   skill's existing `pbq_live_…` Bearer key:
+   ```bash
+   curl -fsSL \
+     -H "Authorization: Bearer $PLANBOOQ_API_KEY" \
+     -D /tmp/ptb-img-$IDENTIFIER-$N.headers \
+     -o /tmp/ptb-img-$IDENTIFIER-$N.bin \
+     "${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1/attachments/$ID"
+   ```
+   Read the `Content-Type` from the saved headers, map to an
+   extension (`image/png`→`.png`, `image/jpeg`→`.jpg`,
+   `image/webp`→`.webp`, `image/gif`→`.gif`, `video/mp4`→`.mp4`,
+   `video/webm`→`.webm`, `video/quicktime`→`.mov`; default `.bin`),
+   and rename `*.bin` to the correct extension.
+
+   Unlike Linear's `uploads.linear.app` route, Planbooq's v1 API
+   **does** require the `Bearer` prefix — it's the same auth used
+   for every other `PBQ` call in this skill. Don't strip it.
+
+   On 4xx/5xx, log the failure for that id and continue with the
+   rest — partial coverage beats none. Cap at 8 images per ticket
+   to keep the prompt manageable.
+4. **Record a manifest.** Write `/tmp/ptb-img-$IDENTIFIER-manifest.txt`
+   with one line per successful download:
+   `<local-path>  <original-url>`. This lets the Team Lead correlate
+   the downloaded file with the reference in `$DESCRIPTION`.
+
+Pass the resulting `IMAGES_BLOCK` into the §3a prompt body — see
+the `Reference images` section in the template.
+
 ### 3a. Build the team-build invocation
 
 Hand `/team-build` exactly this prompt body (one ticket only):
@@ -608,6 +709,20 @@ Source: $URL
 Workspace: $WORKSPACE_SLUG  Project: $PROJECT_SLUG  Assignee: $ASSIGNEE  Labels: $LABELS
 
 $DESCRIPTION
+
+$IMAGES_BLOCK
+# When images were hydrated in §3a-img, $IMAGES_BLOCK expands to:
+#
+# ---
+# Reference images (downloaded from the Planbooq ticket — Read these
+# files with the Read tool before designing the change; they are
+# what the requester actually showed):
+# - /tmp/ptb-img-$IDENTIFIER-1.png  (originally: <planbooq-attachment-url>)
+# - /tmp/ptb-img-$IDENTIFIER-2.png  (originally: <planbooq-attachment-url>)
+# ...
+#
+# When no images were attached or hydration failed, $IMAGES_BLOCK is
+# empty (no header line).
 
 ---
 Closes Planbooq ticket: $IDENTIFIER  ($URL)
@@ -1114,6 +1229,10 @@ on disk waiting for a decision.
     already-correct kanban column.
   - **§3-design step 2** — "design exploration started" comment
     posted before invoking `/team-design`.
+  - **§3a-img** — a "fetching reference images" comment when the
+    description / comments / previews reference auth-gated
+    `/api/attachments/<id>` images and the count is > 0; skipped
+    silently when no images are detected.
   - **§3b** — "team-build started" comment posted before
     invoking `/team-build`.
   - **§3d.5** — "QA capture in progress" comment posted before
