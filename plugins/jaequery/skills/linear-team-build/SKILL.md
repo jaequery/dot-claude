@@ -198,13 +198,33 @@ are three possible outcomes per ticket; pick the first that matches:
 
 2. **DESIGN_EXPLORATION** — UI heuristic fires (label or keyword
    rules below) **AND** the ticket has no signal that design has
-   already been chosen. Signals that design is done (any one ⇒
-   skip this path and fall through to BUILD):
+   already been chosen **AND** no bug-report counter-signal fires.
+   Signals that design is done (any one ⇒ skip this path and fall
+   through to BUILD):
    - label `design-selected` is present, OR
    - label `design-explored` is present (we write this in §3-design
      step 5 once variants have been posted; it survives across
      runs as a structural "this ticket already went through the
      design loop" marker).
+
+   Bug-report counter-signals (any one ⇒ skip this path and fall
+   through to BUILD, even if the UI heuristic fires):
+   - title starts with `Bug:` (case-insensitive, optional leading
+     whitespace) — explicit author signal that this is a defect,
+     not a design exploration.
+   - description contains **both** `Expected:` and `Actual:`
+     (case-insensitive, anywhere in body) — the canonical
+     bug-report template shape; presence of both fields means
+     the author has already pinned down a binary "what should
+     happen vs. what does happen" requirement, which is a
+     deterministic build, not a divergent design problem.
+
+   The counter-signals matter because the keyword list below is
+   intentionally broad ("button", "form", "modal" etc.) and will
+   fire on any UI bug. Without this carve-out, the routing wastes
+   a `/team-design` round on a defect whose fix is binary. PIN-80
+   ("Bug: …button…") was the canonical case that motivated this
+   rule.
 
    When this path matches, run §3-design and continue the queue —
    do NOT run the §3a-pre…§3f build path for this ticket.
@@ -227,7 +247,8 @@ UI heuristic for path 2 (any one fires):
   `dark mode`.
 
 Print the route decision per ticket, e.g.
-`ENG-123 → route=DESIGN_EXPLORATION (label "needs-design")`.
+`ENG-123 → route=DESIGN_EXPLORATION (label "needs-design")` or
+`ENG-124 → route=BUILD (bug-report counter-signal: "Bug:" prefix overrides UI keyword)`.
 
 ### 3-state. Move state to "In Progress" FIRST — before any comment
 
