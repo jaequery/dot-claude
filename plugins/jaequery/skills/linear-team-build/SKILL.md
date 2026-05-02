@@ -533,6 +533,21 @@ Push policy for this run (non-negotiable):
   `_Walkthrough not captured: <reason>_` — never silently omit it.
   Linear-team-build's §3d.5 step depends on these artifacts existing
   on disk.
+- **"No UI surface mutation" is NOT a valid waiver reason.** The
+  capture trigger is the §5 step-1 diff regex, not the agent's
+  judgment about whether the change "feels visual." Conditional
+  render gates, pill/badge/chip/banner gating, helper functions
+  consumed by JSX, copy swaps, and class-string changes ALL count as
+  UI mutations even when no new component is added. PIN-88 is the
+  canonical failure: a one-line edit to a render condition shipped
+  with `_Walkthrough not captured: no UI surface mutation_` because
+  the agent rationalized around the regex; reviewer had no visual
+  proof. If the regex matches, capture. The only acceptable "not
+  captured" reasons are infrastructural failures (no E2E config AND
+  synthetic boot failed AND repo `.team-build/capture.sh` absent) —
+  and those must include the specific failure mode, not a self-
+  judged rationale. See `/team-build` §5 step 1 for the full list of
+  banned waiver phrases.
 ```
 
 Slug for the worktree path: `$IDENT` lowercased (e.g. `eng-123`).

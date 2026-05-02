@@ -498,6 +498,55 @@ execute the §5a capture script *inline* (not delegate to QA) before or
 in parallel with QA dispatch. Capture is mechanical, not judgment —
 the QA agent's job is to render a verdict, not to run shell scripts.
 
+> ## ⛔ The diff regex is the ONLY test for "is this UI work?"
+>
+> If `$UI_DIFF` is non-empty, capture is mandatory. You do NOT get to
+> override this with a self-judged "no UI surface mutation" / "pure
+> label gate" / "backend-driven label fix" / "no new component" /
+> "covered by unit tests" rationale. **All of the following count as
+> UI mutations and require a walkthrough:**
+>
+> - **Conditional-render gates.** Changing whether or when an existing
+>   element appears (`{cond && <Pill/>}`, ternary class swaps,
+>   `display: none` toggles, `visibility` flips). The pixels the user
+>   sees change → it's a UI change. PIN-88 (newpintask, May 2026) is
+>   the canonical failure: a one-line edit to a render condition
+>   shipped without a walkthrough because the agent ruled "no UI
+>   surface mutation"; reviewer had no visual proof the fix worked.
+> - **Pill / badge / chip / banner / toast / status-label rendering
+>   conditions.** Even if no JSX node was added, gating which one
+>   renders or which copy/color is shown is a UI change.
+> - **Variant gating** (loading vs. empty vs. error vs. success vs.
+>   permission-denied state selection).
+> - **Class-string changes** (color, size, layout, spacing,
+>   visibility, focus, hover, disabled).
+> - **Copy / label / icon swaps** in any rendered surface.
+> - **Helper functions consumed by JSX** (e.g. `isMatchTerminallyExhausted`,
+>   `getStatusColor`, `formatLabel`) — even if the helper itself
+>   lives in a non-UI file, if its callers are in `.tsx`/JSX render
+>   paths, the diff regex catches the callers and the rule applies.
+>
+> The ONLY waivers are:
+> 1. The diff regex genuinely matched only non-render files (test
+>    fixtures, `.d.ts` types, storybook stories with no production
+>    callers, build/config touching `app/` paths).
+> 2. The capture script *itself* failed (boot error, no E2E config,
+>    auth wall the synthetic flow can't pass). In that case follow
+>    §5a's "capture failed" path — surface the reason loudly, do
+>    not silently skip.
+>
+> Phrases that have shipped past this gate before and must NOT — if
+> you find yourself writing any of these in the §5/§6 report, STOP
+> and run capture instead:
+> - "_Walkthrough not captured: no UI surface mutation_"
+> - "_Backend-driven label bug — pure logic change_"
+> - "_The change is verified by unit tests; no walkthrough needed_"
+> - "_No new component was added; visual capture N/A_"
+>
+> Unit tests verify *logic correctness*. Walkthroughs verify *what
+> the user sees*. They are not substitutes. Both are required when
+> `$UI_DIFF` matches.
+
 **Step 2 — dispatch `Code Reviewer` and the chosen QA agent in parallel.**
 
 - **Code Reviewer** scope: full diff `$BASE_SHA..HEAD`. Check correctness,
