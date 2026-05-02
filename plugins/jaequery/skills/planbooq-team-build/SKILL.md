@@ -308,6 +308,254 @@ tickets — no confirmation prompt.
 For each selected ticket, in order, run the sub-routine below. Print
 the running results table after each ticket finishes.
 
+### 3-route. Decide the path: design exploration vs. direct build
+
+Before any branch resolution or dispatch, route the ticket. There
+are three possible outcomes per ticket; pick the first that matches:
+
+1. **AWAITING_HUMAN** — ticket has the label `Choose Design` (any
+   case) **AND does NOT have `design-selected`**. A previous
+   `/planbooq-team-build` run already produced variants and the
+   human hasn't signaled a pick yet. Skip this ticket entirely:
+   do **not** transition status, do **not** post a comment, do
+   **not** dispatch. Record verdict `AWAITING_HUMAN` in the
+   results table and continue to the next ticket.
+
+   The `AND NOT design-selected` clause matters: a human who adds
+   `design-selected` *without* removing `Choose Design` (a common,
+   forgivable slip) would otherwise be stuck here forever. The
+   `design-selected` label is the stronger signal — if it's
+   present, the human has picked, period.
+
+2. **DESIGN_EXPLORATION** — UI heuristic fires (label or keyword
+   rules below) **AND** the ticket has no signal that design has
+   already been chosen. Signals that design is done (any one ⇒
+   skip this path and fall through to BUILD):
+   - label `design-selected` is present, OR
+   - label `design-explored` is present (we write this in §3-design
+     step 4 once variants have been posted; it survives across
+     runs as a structural "this ticket already went through the
+     design loop" marker).
+
+   When this path matches, run §3-design and continue the queue —
+   do NOT run the §3a-pre…§3f build path for this ticket.
+
+   **Why a label, not a comment marker?** Labels are returned by
+   the same `GET /tickets/{id}` call that fetches the ticket, so
+   detection is one read. A comment-body marker would require a
+   second `GET /tickets/{id}/comments` query and grep — more
+   moving parts, more failure modes.
+
+3. **BUILD** — everything else. Proceed to §3a-pre and run the
+   normal `/team-build` path through §3f.
+
+UI heuristic for path 2 (any one fires):
+- Label match: `^(ui|ux|design|frontend|web|mobile|needs-design)$`
+  case-insensitive.
+- Keyword match in title or description (case-insensitive,
+  whole-word): `UI`, `UX`, design, layout, style, visual, page,
+  screen, component, button, form, modal, theme, responsive,
+  `dark mode`.
+
+Print the route decision per ticket, e.g.
+`PBQ-123 → route=DESIGN_EXPLORATION (label "needs-design")`.
+
+### 3-state. Move status to "Building" FIRST — before any comment
+
+**Status change is the very first mutation on the ticket.** The
+moment §3-route says we're going to do real work (route is BUILD
+or DESIGN_EXPLORATION), transition the ticket to `Building`
+*before* posting the §3-announce comment, before resolving
+branches, before any long-running step. The Planbooq board must
+reflect "the robot is working on this right now" the instant any
+external observer opens the board — not 30 seconds later when the
+announce comment lands, never. A ticket sitting in "Todo" while
+the bot has already committed to working on it is the bug this
+section exists to prevent.
+
+Skip this section only when route is **AWAITING_HUMAN** — those
+tickets are already in the column the human needs them in, and
+mutating them would be wrong.
+
+```bash
+PBQ POST "/tickets/$TICKET_ID/move" \
+  "$(jq -nc --arg s "$STATUS_BUILDING_ID" '{toStatusId:$s}')" \
+  || echo "warning: failed to move $TICKET_ID to Building; continuing"
+```
+
+On any failure, log a warning and continue — do not block the
+build on a status mutation, but the §3-announce comment that
+follows must still describe the ticket as "in progress" (the
+status move is best-effort but always *attempted* first, so the
+comment narrative reflects intended state).
+
+Print the transition per ticket, e.g.
+`PBQ-123 → status=Building (was Todo)`.
+
+### 3-announce. Post a "picked up" comment AFTER the status move
+
+For every ticket whose route is **BUILD** or **DESIGN_EXPLORATION**
+(i.e. anything except AWAITING_HUMAN), post a Planbooq comment
+immediately after §3-state — before §3a-pre, before any long-running
+operation. Stakeholders watching the ticket in Planbooq should see
+"the robot is on it" the moment we commit to doing real work, not
+5 minutes later when the first phase comment lands. By the time
+this comment renders, the ticket already shows "Building" in the
+kanban (per §3-state), so the announce comment reinforces what the
+status already says rather than racing it.
+
+```markdown
+### 🤖 picked up by /planbooq-team-build
+
+- **Route:** `$ROUTE` (`DESIGN_EXPLORATION` → variants first, then human picks; `BUILD` → straight to /team-build)
+- **Why this route:** $ROUTE_REASON   <!-- e.g. "label `needs-design`", "keyword `modal` in title", "design-selected label present, going straight to build" -->
+- **Position in queue:** $POS / $TOTAL
+
+Next steps I'll narrate as I go — every status change, label change,
+and dispatch will land here as a comment so you don't have to watch
+the terminal. If something blocks, the blocker comment is the last
+one before silence.
+```
+
+This is the FIRST comment on every active ticket, even before the
+phase-specific "design exploration started" / "team-build started"
+comments. The phase comments still post — this one is additive,
+not a replacement. AWAITING_HUMAN never gets this comment (it's
+the only carve-out from the "narrate everything" rule).
+
+### Label helper (used throughout §3)
+
+Planbooq labels are managed via `PATCH /tickets/{id}` with the
+`labelIds` array. To add or remove labels by name:
+
+1. Resolve label IDs from the workspace: try `GET /workspaces/{id}/labels`
+   first; if that endpoint returns 404 on a given deployment, fall back
+   to reading labels off the ticket's existing `.labels[]` field
+   (`GET /tickets/{id}`) and building a `name → id` map from what's
+   already in use.
+2. If a needed label doesn't exist yet, attempt to create via
+   `POST /workspaces/{id}/labels` with `{ name, color }`. If that
+   endpoint is also unavailable on the deployment, log a warning and
+   skip the label op for this run (the kanban status is still the
+   primary signal).
+3. Compute the merged label-id set (current + added − removed) and
+   send `PATCH /tickets/{id}` with `{ labelIds: [...] }`.
+
+Labels created by this skill: `Designing`, `Choose Design`,
+`design-explored`, `design-selected`, `Building`, `Testing`. Label
+add/remove is best-effort — log a warning on failure and continue;
+never block dispatch on a label mutation.
+
+**Exception to "best-effort":** `design-explored` MUST stick. If
+adding it in §3-design step 4 fails, retry once before giving up.
+Without it, the next run can't tell the ticket already went through
+the design loop and will route it back through `/team-design` —
+wasted variants, duplicate noise on the ticket. If both attempts
+fail, surface a loud warning in the final summary and append a
+`_design-explored label could not be written — manual cleanup
+required_` line to the "variants ready" comment so the human knows.
+
+### 3-design. Design exploration path (route = DESIGN_EXPLORATION)
+
+The ticket needs divergent variants before anyone writes code. We
+hand it to `/team-design` (Planbooq has no `/planbooq-design`
+wrapper — `/team-design` is invoked directly), let it produce
+variant branches with screenshots, then return the ticket to
+**Todo** with `Choose Design` + `design-explored` labels so a
+human can pick. The next `/planbooq-team-build` run will see the
+`design-explored` label (or `design-selected` once the human
+picks) and skip straight to BUILD.
+
+Status is already "Building" — §3-state moved it before §3-announce.
+
+1. **Add label `Designing`.** Remove `needs-design` if present.
+2. **Post the "starting design" comment**:
+   ```markdown
+   ### 🎨 design exploration started
+
+   Routing through `/team-design` because this ticket looks
+   design-flavored (UI label or UX keywords in title/description).
+
+   - `/team-design` is producing N divergent variants in parallel,
+     each on its own branch (`team-design/<slug>-<variant>`).
+   - When done, I'll post one comment per variant on this ticket
+     with the variant's branch link and screenshots committed to
+     that branch (referenced via `raw.githubusercontent.com`).
+   - This ticket then moves back to **Todo** with the
+     **`Choose Design`** label. Pick a variant by leaving a
+     comment, then add the **`design-selected`** label (or just
+     remove `Choose Design`) and re-run `/planbooq-team-build` —
+     the next run will skip design and go straight to
+     `/team-build` with the chosen direction in context.
+   ```
+3. **Invoke `/team-design`.** Make exactly one Skill-tool call
+   with `--variants 4` (unless the description specifies a count)
+   and the ticket title + description as the brief. Use a slug
+   based on the ticket identifier so each variant lands on
+   `team-design/<identifier-lower>-<variant-name>`.
+4. **After it returns** (success path only — failure handling at
+   the end of §3-design):
+   - **Add label `design-explored`** (per the label helper's
+     exception clause: this label MUST stick — retry once on
+     failure, surface loudly if it can't be written).
+   - Remove label `Designing`. Add label `Choose Design`.
+   - Move status → **Todo**:
+     ```bash
+     PBQ POST "/tickets/$TICKET_ID/move" \
+       "$(jq -nc --arg s "$STATUS_TODO_ID" '{toStatusId:$s}')"
+     ```
+   - For each variant branch produced by `/team-design`, post a
+     per-variant comment on the ticket. Each comment includes:
+     - Variant name and branch link:
+       `https://github.com/$REPO_FULL/tree/$VARIANT_BRANCH`
+     - Embedded screenshots from the variant branch (committed
+       under `.team-design/<variant>/screenshots/*.png` by
+       default). Reference each via
+       `https://raw.githubusercontent.com/$REPO_FULL/$VARIANT_BRANCH/.team-design/<variant>/screenshots/<file>`.
+       If `/team-design` writes screenshots elsewhere, locate
+       them by `git ls-tree -r origin/$VARIANT_BRANCH | grep -E '\.(png|jpg|jpeg|webp)$'`
+       under any `team-design` or `.team-design` directory.
+   - Post the "variants ready" comment as the final comment in
+     the batch:
+     ```markdown
+     ### 🎨 variants ready — please pick one
+
+     `/team-design` finished. Each variant is a comment above this
+     one with its branch + screenshots. Check out a branch locally
+     to compare interactively.
+
+     **To proceed:**
+     1. Decide which variant to ship.
+     2. Either add the **`design-selected`** label, or remove the
+        **`Choose Design`** label (either signals "pick recorded"
+        — both work).
+     3. Re-run `/planbooq-team-build` — this ticket will route
+        straight to `/team-build` and the build team will see the
+        chosen direction in the comment history above.
+
+     The `design-explored` label on this ticket is the structural
+     marker that prevents the next run from re-routing through
+     `/team-design` — leave it attached.
+     ```
+5. Record verdict `DESIGN_HANDOFF` in the results table. Note the
+   per-variant `team-design/...` branches in the row's "Next step"
+   cell so they appear in §5's summary. Continue to the next
+   ticket. Do NOT run §3a-pre…§3f for this ticket.
+
+**Final consistency sweep at the end of §3-design** (success path):
+re-fetch the ticket and confirm the label set matches expectations
+(`design-explored` ✓, `Choose Design` ✓, `Designing` ✗, status =
+`Todo`). If any label or status is inconsistent (e.g., `Designing`
+still attached because removal failed earlier), retry the failing
+mutation once. This catches the partial-failure case where step 4
+half-completed.
+
+**Failure path:** If `/team-design` itself escalates or fails,
+treat it like a BUILD failure: comment the blocker, move status
+back to **Todo**, remove `Designing`, do NOT add `Choose Design`
+or `design-explored` (nothing to choose, didn't actually explore),
+record verdict `DESIGN_FAILED`.
+
 ### 3a-pre. Resolve the working branch and target branch
 
 Two distinct branches matter per ticket:
@@ -419,22 +667,47 @@ Push policy for this run (non-negotiable):
   remaining issues in the PR body so a human can review on GitHub.
 - This is autonomous Planbooq backlog burndown; treat the PR itself as
   the review surface, not a local gate.
+- **Evidence capture is NOT skipped.** The push-policy override only
+  waives the typed-`yes` gate and the APPROVED-loop. You MUST still
+  execute the §5a capture script inline (Playwright/Cypress E2E with
+  `video: "on"` if configured, else the synthetic walkthrough) for
+  any UI-bearing diff and commit the resulting
+  `$WT_PATH/.team-build/evidence/` directory before pushing. If
+  capture fails (no E2E config AND synthetic boot fails), surface the
+  reason in the PR body and the §3e Planbooq comment as
+  `_Walkthrough not captured: <reason>_` — never silently omit it.
+  Planbooq-team-build's §3d.5 step depends on these artifacts existing
+  on disk.
+- **"No UI surface mutation" is NOT a valid waiver reason.** The
+  capture trigger is the §5 step-1 diff regex, not the agent's
+  judgment about whether the change "feels visual." Conditional
+  render gates, pill/badge/chip/banner gating, helper functions
+  consumed by JSX, copy swaps, and class-string changes ALL count as
+  UI mutations even when no new component is added. If the regex
+  matches, capture. The only acceptable "not captured" reasons are
+  infrastructural failures (no E2E config AND synthetic boot failed
+  AND repo `.team-build/capture.sh` absent) — and those must include
+  the specific failure mode, not a self-judged rationale. See
+  `/team-build` §5 step 1 for the full list of banned waiver phrases.
 ```
 
 Slug for the worktree path: `pbq-${IDENTIFIER_LOWER}` (e.g.
 `pbq-pbq-123`). `/team-build` adds its own timestamp suffix.
 
-### 3b. Move the ticket to "Building" + post a "starting" comment
+### 3b. Add the `Building` label + post a "starting" comment
 
-Before launching, move the ticket to `Building`:
+Status is already `Building` — §3-state moved it before §3-announce.
+This section only handles the BUILD-specific label and the
+"team-build started" status comment; do NOT re-issue the status
+transition here (it's redundant and could fight a human who manually
+nudged the status in the meantime).
 
-```bash
-PBQ POST "/tickets/$TICKET_ID/move" \
-  "$(jq -nc --arg s "$STATUS_BUILDING_ID" '{toStatusId:$s}')"
-```
-
-On any failure, log a warning and continue — do not block the build
-on a status mutation.
+**Add the `Building` label** (best-effort, per the label helper).
+If the route was DESIGN_EXPLORATION → BUILD on this re-run, the
+ticket may also carry `design-selected` and/or `Choose Design` —
+leave `design-selected` in place (it's a historical record) and
+remove `Choose Design` if it's still present (the human signaled
+by re-running this skill).
 
 Then post a status comment so non-terminal stakeholders can follow
 along (write the body to a temp file and `jq` it into a JSON string
@@ -485,8 +758,43 @@ branch as `--working-branch`:
 
 (One arg blob: the flags, blank line, then the §3a body.)
 
-`/team-build` runs end-to-end in that single turn. It returns
-APPROVED-and-shipped, ESCALATED, or FAILED.
+`/team-build` runs end-to-end in that single turn (worktree, plan,
+build, security, QA, push, PR). It returns APPROVED-and-shipped,
+ESCALATED, or FAILED.
+
+> ## ⛔ STOP — post-dispatch checklist (read every time `/team-build` returns)
+>
+> The single most common failure mode of this skill is the outer
+> runner treating an APPROVED return as "ticket done" and writing a
+> closing summary right here. **APPROVED from `/team-build` means
+> "build shipped, now publish the result back to Planbooq" — not
+> "we're done."** The inner skill's APPROVED applies to *its*
+> contract; the outer ticket isn't closed until §3d → §3d.5 → §3e
+> have all run.
+>
+> Before writing ANY user-facing text after `/team-build` returns,
+> mentally tick this checklist for the ticket you just dispatched:
+>
+> 1. [ ] §3c isolation check ran (`gh pr list` shows exactly one new
+>        PR with the right head ref).
+> 2. [ ] §3d outcome captured (PR URL, PR number, branch, worktree,
+>        verdict, rounds, `$TICKET_ID`, `$IDENTIFIER`).
+> 3. [ ] §3d.5 ran for any UI-bearing diff: artifacts located OR
+>        captured inline, then committed to the PR branch and pushed
+>        (raw URL recorded). For non-UI diffs, explicitly noted "no
+>        UI surface" instead of skipping silently.
+> 4. [ ] §3e Planbooq comment posted AND status transitioned
+>        (`Review` for any verdict where a PR was opened, `Todo` for
+>        no-PR aborts). Phase labels (`Building`, `Testing`) cleaned
+>        up. `prUrl` patched onto the ticket.
+>
+> If ANY box is unticked, you are not allowed to:
+> - Move to the next ticket in the queue.
+> - Write the §5 final summary.
+> - Write any "## /team-build — APPROVED" / "wrap up" message.
+>
+> Do the missing step first, then resume. Writing a closing summary
+> with unticked boxes is the bug this checklist exists to prevent.
 
 After it returns, verify isolation:
 - `gh pr list` must now show **exactly one** new open PR vs.
@@ -501,144 +809,129 @@ After it returns, verify isolation:
 ### 3d. Capture the outcome
 
 Record: PR URL, PR number, branch name, worktree path, verdict,
-rounds run.
+rounds run, `$TICKET_ID`, `$IDENTIFIER`, `$REPO_FULL` (from
+`gh repo view --json nameWithOwner -q .nameWithOwner`) — needed by
+§3d.5 for committing the report zip and constructing the raw URL.
 
-### 3d.5. Screenshot + video capture (UX/design tickets only)
+### 3d.5. Visual asset reuse (UX/design tickets only)
 
-Same trigger logic as `/github-team-build` §3d.5 — only run when
-verdict is **APPROVED** AND the ticket touches the UI (frontend-shaped
-diff, design label, or UI keywords in title/description). Boot the
-project's dev server once in a fresh read-only worktree and reuse it
-for both passes below.
+**Before locating/capturing, swap labels: remove `Building`, add
+`Testing`** (best-effort, per the label helper). Post a one-line
+comment so observers see the phase change:
 
-**Pass A — Screenshots (Playwright MCP).** Capture three stills via
-`mcp__playwright__*`: desktop 1440×900, mobile 390×844, and one
-desktop-after-interaction shot (click the most ticket-relevant CTA
-before snapping). Save as PNG.
+```markdown
+### 🧪 QA capture in progress
 
-**Pass B — Video walkthrough (native Playwright, not MCP).** Spawn a
-short Node script via Bash that drives a real `recordVideo` session
-so you get a true `.webm` recording, not a slideshow. The MCP surface
-does not expose `recordVideo`, so this is the only way to get a real
-video. Inline script lives at
-`.planbooq-team-build/cap/<identifier>/record.mjs`; use `npx -y
-playwright@latest` so projects without Playwright installed still
-work. Skeleton:
-
-```js
-// record.mjs — deterministic default walkthrough.
-// No LLM-authored steps required: derives a sensible click/scroll
-// sequence from the DOM + the diff. Always produces a usable video.
-import { chromium } from 'playwright';
-import fs from 'node:fs';
-
-const url      = process.env.WALKTHROUGH_URL;
-const out      = process.env.OUT_DIR;
-// Selectors to prioritise hovering — passed in as a JSON array of
-// CSS selectors derived from the diff (see "Selector extraction"
-// below). Falls back to an empty array if not provided.
-const targets  = JSON.parse(process.env.DIFF_SELECTORS || '[]');
-
-const browser = await chromium.launch();
-const ctx = await browser.newContext({
-  viewport: { width: 1440, height: 900 },
-  recordVideo: { dir: out, size: { width: 1440, height: 900 } },
-});
-const page = await ctx.newPage();
-
-const wait = (ms) => page.waitForTimeout(ms);
-const safe = async (fn) => { try { await fn(); } catch {} };
-
-await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
-await wait(800);
-
-// 1. Hover each diff'd selector that actually exists on the page.
-for (const sel of targets.slice(0, 4)) {
-  await safe(async () => {
-    const el = await page.locator(sel).first();
-    if (await el.count()) {
-      await el.scrollIntoViewIfNeeded({ timeout: 2000 });
-      await el.hover({ timeout: 2000 });
-      await wait(500);
-    }
-  });
-}
-
-// 2. Generic scroll pass — top → mid → bottom → top.
-await page.evaluate(() => window.scrollTo({ top: 0 }));
-await wait(400);
-await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'smooth' }));
-await wait(900);
-await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
-await wait(900);
-await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-await wait(700);
-
-// 3. Click the most plausible primary CTA — first non-disabled
-// button or link inside the visible viewport, preferring ones that
-// look like CTAs (filled buttons, links with role=button, etc.).
-await safe(async () => {
-  const cta = page.locator(
-    'button:not([disabled]):visible, [role="button"]:visible, a.btn:visible, a[class*="button"]:visible'
-  ).first();
-  if (await cta.count()) {
-    await cta.scrollIntoViewIfNeeded({ timeout: 1500 });
-    await cta.hover({ timeout: 1500 });
-    await wait(400);
-    await cta.click({ timeout: 2000, trial: false });
-    await wait(1200);
-  }
-});
-
-await ctx.close();
-await browser.close();
+Build round complete. Locating the Playwright report (screenshots,
+traces, video — all in one zip) and committing it to the PR branch
+for upload-free review. Label moved `Building` → `Testing`.
 ```
 
-**Selector extraction.** Before invoking `record.mjs`, derive
-`DIFF_SELECTORS` from the PR diff so the walkthrough actually visits
-what changed:
-1. `git diff $RESOLVED..$WORKING_BRANCH -- '*.tsx' '*.jsx' '*.vue' '*.svelte' '*.html'`
-2. Grep added/changed lines for `data-testid="…"`, `id="…"`, and
-   `className="…"` (single-token classes that look component-y, e.g.
-   not utility classes like `flex`, `p-4`).
-3. Convert to selectors: `data-testid` → `[data-testid="x"]`,
-   `id` → `#x`, class → `.x`. Cap at the 8 most-frequently-touched.
-4. Pass to the script via `DIFF_SELECTORS=$(jq -c -n --argjson a "$ARRAY" '$a')`.
+**Capture happens during QA in `/team-build` §5a.** This section
+locates the artifacts that QA produced and commits them to the PR
+branch as a single `playwright-report.zip` referenced from the §3e
+comment via `raw.githubusercontent.com`. If they aren't on disk
+(autonomous push-policy mode skipped capture, or capture genuinely
+failed), this section runs the §5a capture script itself before
+zipping — UI tickets without a walkthrough are not acceptable.
 
-If the diff is purely backend / non-frontend (no markup files
-touched), `DIFF_SELECTORS=[]` is fine — the generic scroll + CTA
-pass alone still yields a usable walkthrough. If the §3d.5 trigger
-fired but the diff has zero markup files, log
-`_Walkthrough used generic pass — no UI selectors in diff._` to the
-ticket comment so reviewers know the video is general, not
-ticket-specific.
+Runs when **any** of: ticket touches the UI (per detection rules
+below), verdict is APPROVED, or verdict is ESCALATED but a PR was
+opened. The only skip condition is "no UI surface in the diff."
 
-Convert the `.webm` to `.mp4` (better PR/Planbooq render) via
-`ffmpeg -i walkthrough.webm -c:v libx264 -pix_fmt yuv420p -movflags
-+faststart walkthrough.mp4` — only if `ffmpeg` is on `PATH`.
-Otherwise keep the `.webm`.
+**Detection (any one fires):**
+1. The PR diff contains frontend-shaped files (`gh pr diff "$PR_NUMBER" --name-only`
+   matching `\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less|stylus)$` or
+   `/(components|pages|app|views|routes|styles|public)/`).
+2. The Planbooq ticket has a label matching `^(ui|ux|design|frontend|web|mobile)$`
+   (case-insensitive).
+3. Title/description contains any of: `UI`, `UX`, design, layout, style,
+   visual, page, screen, component, button, form, modal, theme,
+   responsive, dark mode (case-insensitive whole-word).
 
-**Commit + reference.** Both stills and the video go to the PR branch
-under `.planbooq-team-build/shots/<identifier>/`. Reference via
-`raw.githubusercontent.com` URLs in the §3e comment — embed stills as
-`![<label>](url)` and the video as a plain markdown link
-`[walkthrough.mp4](url)` (Planbooq won't render `<video>` inline; the
-GitHub PR description renders `.mp4` natively if pasted as a bare
-URL, so include the bare URL once underneath the link).
+If none fire → skip §3d.5, proceed to §3e with no assets.
 
-**Failure modes** (each downgrades, never aborts the ticket):
-- No dev server / port detection failed → skip both passes; emit
-  `_Screenshots not captured: no dev server detected._`
-- Pass A errors → emit `_Screenshots not captured: <reason>._` and
-  still attempt Pass B.
-- Pass B errors (Playwright install fails offline, walkthrough
-  throws, no `ffmpeg`) → keep whatever Pass A produced and emit
-  `_Walkthrough video not captured: <reason>._` Note: `.webm` is a
-  valid fallback when `ffmpeg` is missing — only fail the video pass
-  if Playwright itself errored.
-- Push rejected → emit a single `_Capture artifacts not pushed: <reason>._`
+**Locate or build the Playwright report zip.** The Playwright HTML
+report already contains every screenshot, trace, and video the run
+produced — committing it as a single zip to the PR branch is
+dramatically simpler than extracting individual assets and embedding
+them inline. One file, one commit, one link in the comment.
 
-Never fabricate an image or video.
+```bash
+EVID="$WT/.team-build/evidence"
+REPORT_DIR="$EVID/playwright-report"      # default Playwright output dir
+REPORT_ZIP="$EVID/playwright-report.zip"
+```
+
+Resolution order:
+1. **Pre-built zip** — if `$REPORT_ZIP` already exists (§5.5 may have
+   zipped and committed it), use it as-is.
+2. **Pre-built report dir** — if `$REPORT_DIR` exists but no zip,
+   build one: `(cd "$EVID" && zip -rq playwright-report.zip playwright-report)`.
+3. **No artifacts on disk** — re-materialize the worktree if §6a
+   cleaned it (see fallback below), then re-run the Playwright capture
+   inline (mirrors `/team-build` §5a's capture-resolution order:
+   Playwright with override config → Cypress → repo
+   `.team-build/capture.sh` → `package.json` `team-build.capture` →
+   `pnpm install && pnpm db:migrate && pnpm db:seed && pnpm dev` +
+   synthetic walkthrough). Cap total time at 5 minutes. After the
+   run, zip whatever Playwright wrote into `$REPORT_DIR`.
+4. **Still nothing** — post the §3e comment with
+   `_Playwright report not captured: <one-line reason>_` AND open a
+   follow-up TODO comment naming what setup is missing (Playwright
+   config? `.team-build/capture.sh`?) so the next run captures
+   cleanly. This is the only path that ships UI work without a
+   report — and it must be loud.
+
+**Worktree-cleanup fallback.** If `$WT` no longer exists (cleaned by
+`/team-build` §6a after PR open), create a read-only worktree at
+`$WORKING_BRANCH` to access the committed report:
+```bash
+SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.pbq-evidence-$IDENTIFIER_LOWER-$$"
+git -C "$REPOROOT" worktree add --detach "$SHOT_WT" "origin/$WORKING_BRANCH"
+WT="$SHOT_WT"  # rebind for the rest of §3d.5
+```
+Clean up at the end of §3d.5: `git worktree remove --force "$SHOT_WT"`.
+
+**Commit the zip to the PR branch and push.** Planbooq has no
+equivalent of Linear's `fileUpload` mutation, so the zip lives on
+the PR branch under `.planbooq-team-build/shots/<identifier>/` and
+the §3e comment links it via `raw.githubusercontent.com`:
+
+```bash
+DEST_DIR="$WT/.planbooq-team-build/shots/$IDENTIFIER_LOWER"
+mkdir -p "$DEST_DIR"
+cp "$REPORT_ZIP" "$DEST_DIR/playwright-report.zip"
+
+git -C "$WT" add ".planbooq-team-build/shots/$IDENTIFIER_LOWER/playwright-report.zip"
+git -C "$WT" -c user.name="planbooq-team-build" \
+            -c user.email="planbooq-team-build@local" \
+  commit -m "playwright report for $IDENTIFIER" \
+  || echo "nothing to commit"
+
+git -C "$WT" push origin "$WORKING_BRANCH" \
+  || { echo "warning: report push rejected; will surface in §3e comment"; PUSH_FAILED=1; }
+
+REPO_FULL=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+REPORT_URL="https://raw.githubusercontent.com/$REPO_FULL/$WORKING_BRANCH/.planbooq-team-build/shots/$IDENTIFIER_LOWER/playwright-report.zip"
+```
+
+> **Why `raw.githubusercontent.com`, not the GitHub blob view URL?**
+> The blob URL (`github.com/.../blob/...`) renders the file in
+> GitHub's UI; reviewers click it and get a "view raw" page, not a
+> download. The raw URL streams the zip directly so a single click
+> from the Planbooq comment downloads the file. Always use
+> `raw.githubusercontent.com`.
+
+Record `$REPORT_URL`. If push failed (`$PUSH_FAILED=1`) or the
+commit produced no changes to push, log the failure and proceed to
+§3e — surface it there as `_Playwright report push rejected:
+<reason>_` or `_Playwright report not committed: <reason>_`, never
+block §3e.
+
+If you re-created a read-only worktree to access committed evidence,
+clean it up (`git worktree remove --force "$SHOT_WT"`) before
+returning to §3e.
 
 ### 3e. Update the ticket
 
@@ -649,6 +942,11 @@ the ticket belongs in `Review`.
 
 - **PR was opened (any verdict — APPROVED, ESCALATED, or FAILED but
   team-build still pushed):**
+  **First, clean up phase labels** (best-effort, per the label
+  helper): remove `Testing` and remove `Building` if it's still
+  attached. Do not add a new phase label here — the kanban status
+  (`Review`, set below) is the signal for this stage.
+
   ```bash
   PBQ POST "/tickets/$TICKET_ID/comments" "$(jq -Rs '{body:.}' < /tmp/pbq-done-$TICKET_ID.md)"
   PBQ PATCH "/tickets/$TICKET_ID" \
@@ -656,28 +954,44 @@ the ticket belongs in `Review`.
   PBQ POST "/tickets/$TICKET_ID/move" \
     "$(jq -nc --arg s "$STATUS_REVIEW_ID" '{toStatusId:$s}')"
   ```
+
   The `PATCH` call sets the ticket's native `prUrl` field so the PR
   shows up in the ticket's "Add PR link…" slot in the UI — not just
   buried in the comment thread. **This is required**, not optional;
   the comment alone does not link the ticket to the PR. Best-effort:
   on failure, log a warning and continue (the comment already
-  contains the URL as a fallback). Comment body: PR URL + one-line summary + verdict
-  (APPROVED / ESCALATED / FAILED). For non-APPROVED verdicts, also
-  include the blocker summary so a human can pick up where the loop
-  stopped. **Always append a `### Verification` section** mirroring
-  the PR body's verification checks: each acceptance check on its own
+  contains the URL as a fallback).
+
+  Comment body: PR URL + one-line summary + verdict (APPROVED /
+  ESCALATED / FAILED). For non-APPROVED verdicts, also include the
+  blocker summary so a human can pick up where the loop stopped.
+  **Always append a `### Verification` section** mirroring the PR
+  body's verification checks: each acceptance check on its own
   bullet with the evidence (test name, command output excerpt,
-  screenshot ref, or `unverified — <reason>`). This is how the human
-  reviewer in the `Review` column knows what was actually confirmed
-  vs. assumed. If §3d.5 produced screenshots, append a `### Screenshots`
-  section embedding each as `![<label>]($RAW_URL)` in capture order.
-  If §3d.5 produced a walkthrough video, append a `### Walkthrough`
-  section with `[walkthrough.mp4]($RAW_URL)` followed by the bare
-  URL on its own line (the GitHub PR auto-renders the player from
-  a bare `.mp4` URL).
+  screenshot ref, or `unverified — <reason>`). This is how the
+  human reviewer in the `Review` column knows what was actually
+  confirmed vs. assumed.
+
+  **If §3d.5 committed a Playwright report zip, append a
+  `### Playwright report` section with a single link:**
+  ```markdown
+  ### Playwright report
+
+  [playwright-report.zip]($REPORT_URL)
+
+  Download, unzip, then run `npx playwright show-report <unzipped-dir>`
+  to view every spec's screenshots, traces, and video.
+  ```
+  If §3d.5 ran but the push failed, append
+  `_Playwright report push rejected: <reason>_`. If §3d.5 captured
+  nothing, append `_Playwright report not captured: <reason>_`. If
+  §3d.5 was skipped (not a UX/design ticket), omit the section
+  entirely.
+
   Do **not** move the ticket to `QA` or `Done` here.
 - **No PR was opened (environmental abort, target branch missing,
   etc.):**
+  Remove `Testing` and `Building` labels first (best-effort).
   ```bash
   PBQ POST "/tickets/$TICKET_ID/comments" "$(jq -Rs '{body:.}' < /tmp/pbq-done-$TICKET_ID.md)"
   PBQ POST "/tickets/$TICKET_ID/move" \
@@ -703,38 +1017,158 @@ warn the user about shared `gh` / Planbooq rate limits but do not cap.
 
 ## 5. Final summary
 
+> **Precondition gate — do not write this section yet if any row is
+> incomplete.** Before producing the summary, walk every ticket row in
+> your head and confirm BOTH of these hold for each one:
+>
+> - The "PR / Next step" cell contains a real GitHub PR URL (for
+>   APPROVED) or an explicit non-URL reason (for ESCALATED / FAILED /
+>   DESIGN_HANDOFF / AWAITING_HUMAN / SKIPPED / DESIGN_FAILED).
+> - A Planbooq comment was posted in §3e for that ticket. If you
+>   can't point to it right now, §3e didn't run for that ticket.
+>
+> If either is missing for any row, STOP and finish §3d.5 + §3e for
+> the offending ticket(s) FIRST, then come back and write the summary.
+> A summary written with missing Planbooq comments is the same bug as
+> "skipping §3e because /team-build returned APPROVED" — the §3c
+> post-dispatch checklist exists to prevent it; this gate is the
+> backstop.
+
 ```
 ## /planbooq-team-build — summary
 Workspace: $WORKSPACE_SLUG   Project filter: ${PROJECT_SLUG:-all}   Status filter: Todo
 Processed: N tickets
 
-| Ticket   | Verdict   | PR                              | Rounds |
-|----------|-----------|---------------------------------|--------|
-| PBQ-123  | APPROVED  | https://github.com/.../pull/45  | 1      |
-| PBQ-130  | ESCALATED | https://github.com/.../pull/46  | 3      |
+| Ticket   | Verdict          | PR / Next step                                | Rounds |
+|----------|------------------|-----------------------------------------------|--------|
+| PBQ-123  | APPROVED         | https://github.com/.../pull/45                | 1      |
+| PBQ-130  | ESCALATED        | https://github.com/.../pull/46                | 3      |
+| PBQ-141  | DESIGN_HANDOFF   | label `Choose Design` — pick variant          | —      |
+| PBQ-142  | AWAITING_HUMAN   | already in `Choose Design` — skipped          | —      |
+| PBQ-150  | DESIGN_FAILED    | /team-design errored — see ticket comment     | —      |
 
-Worktrees still on disk (only ESCALATED/FAILED — APPROVED tickets
-are auto-cleaned by /team-build §6a):
-- /path/to/repo.team-build-pbq-pbq-130-...  (PBQ-130, escalated)
+Worktrees still on disk:
+- ESCALATED/FAILED build worktrees (APPROVED are auto-cleaned by /team-build §6a):
+  - /path/to/repo.team-build-pbq-pbq-130-...  (PBQ-130, escalated)
+- DESIGN_HANDOFF variant worktrees (left intentionally so the human can
+  diff/check out variants before picking — clean up after the pick):
+  - /path/to/repo.team-design-pbq-141-variant-a/  branch `team-design/pbq-141-variant-a`
+  - /path/to/repo.team-design-pbq-141-variant-b/  branch `team-design/pbq-141-variant-b`
+  - …
 
 Comments posted: <count>
 ```
 
-APPROVED tickets have their worktree + local branch removed
-automatically by `/team-build`. Only ESCALATED/FAILED worktrees
-persist for manual debugging.
+APPROVED tickets have their build worktree + local branch removed
+automatically by `/team-build`. ESCALATED/FAILED build worktrees and
+all DESIGN_HANDOFF variant worktrees persist — the former for manual
+debugging, the latter so the human can compare variants before
+picking. Do not prompt to clean up APPROVED worktrees here; do
+surface the DESIGN_HANDOFF variant paths so the user knows what's
+on disk waiting for a decision.
 
 ## Hard rules
 
-- **One PR per ticket. ONE Skill-tool call to `/team-build` per
-  ticket.** Never bundle multiple tickets into one PR, branch,
-  worktree, or team-build invocation.
+- **§3-route runs FIRST, before §3a-pre.** The route decision
+  determines whether this ticket goes through `/team-design`
+  (DESIGN_EXPLORATION), is skipped entirely (AWAITING_HUMAN), or
+  proceeds through the normal `/team-build` path (BUILD). Never
+  dispatch `/team-build` against a ticket carrying the
+  `Choose Design` label — that ticket is waiting on a human and
+  must be left untouched.
+- **Status change is the FIRST mutation, before any comment.** The
+  moment §3-route decides BUILD or DESIGN_EXPLORATION, run §3-state
+  to transition the ticket to `Building` *before* posting the
+  §3-announce comment, *before* any long-running step. A human
+  watching the Planbooq board must never see "Todo" while the bot
+  has already committed to working on the ticket — the kanban
+  column is the strongest "the robot is on it" signal Planbooq
+  surfaces. Comments reinforce status; they never lead it. If you
+  find yourself posting any comment on a ticket whose column still
+  says "Todo," that's the bug §3-state exists to prevent.
+  (AWAITING_HUMAN is the only carve-out — that path mutates
+  nothing.)
+- **Phase labels mirror the workflow.** During a single
+  `/planbooq-team-build` run, a ticket on the BUILD path moves
+  through: status → `Building` (§3-state) → `Building` label (§3b)
+  → `Testing` label (§3d.5) → (cleared at PR open, status =
+  `Review`, §3e). On the DESIGN_EXPLORATION path: status →
+  `Building` (§3-state) → `Designing` (§3-design step 1) →
+  `Choose Design` + `design-explored` (§3-design step 4, status
+  back to `Todo`). Most label transitions are best-effort, but
+  **`design-explored` MUST stick** — it's the structural signal
+  §3-route uses to detect "design already done" and skip
+  re-exploration. Retry once on failure; surface loudly if it
+  can't be written. All other label add/remove failures: log a
+  warning and continue.
+- **Narrate everything BEFORE you do it.** The principle: a human
+  watching only the Planbooq ticket should always know what the
+  robot is currently doing and what's coming next. Post a Planbooq
+  comment *before* every substantive step — not after, not "when
+  the phase finishes". The mandatory pre-comments are:
+  - **§3-announce** — a "picked up by /planbooq-team-build" comment
+    is the FIRST comment that lands on any active ticket, naming
+    the route and reason. Posted *after* §3-state has moved the
+    status to `Building` but *before* any other label change or
+    long-running operation, so the comment lands against an
+    already-correct kanban column.
+  - **§3-design step 2** — "design exploration started" comment
+    posted before invoking `/team-design`.
+  - **§3b** — "team-build started" comment posted before
+    invoking `/team-build`.
+  - **§3d.5** — "QA capture in progress" comment posted before
+    the capture script runs / the report zip is committed.
+  - **§3e** — PR-open / escalation / failure comment posted as
+    the final phase signal, with the resolved status and any
+    Playwright report link.
+
+  Posts are best-effort (a Planbooq API hiccup must not abort the
+  build) but expected. If a comment fails to post, log a warning
+  and continue — never retry inline (would block the build) and
+  never silently skip without logging. **AWAITING_HUMAN is the
+  only carve-out:** that path posts nothing and mutates nothing
+  (the ticket is already in the column the human needs it in —
+  re-commenting on every run would spam the ticket).
+- **§3-state runs BEFORE any dispatch skill, no matter which one.**
+  The ticket must show `Building` the entire time any work is
+  being done on it, so human observers in Planbooq can see
+  something is happening. This applies to `/team-build`,
+  `/team-design`, or any other dispatch skill — moving the ticket
+  is a precondition of dispatch, not something delegated to the
+  dispatched skill. §3-state is the single point that does this
+  transition; §3b and §3-design no longer re-issue it. If §3-state
+  is silently skipped because the skill jumped straight to
+  §3-announce or §3a-pre, that's the bug to fix — re-read §3-state
+  and run it.
+- **One PR per ticket. ONE Skill-tool call to the dispatch skill
+  per ticket** (typically `/team-build`; `/team-design` is allowed
+  for design-flavored tickets where divergent variants are wanted).
+  Never bundle multiple tickets into one PR, branch, worktree, or
+  dispatch invocation.
 - **Every PR body MUST contain the `Closes Planbooq ticket:` line**
   with the identifier and URL. Verify after team-build returns; edit
   the PR via `gh pr edit` if missing.
 - **Verify isolation between tickets.** Snapshot `gh pr list` before
   each call; confirm exactly one new PR with head ref
   `$WORKING_BRANCH` after. Zero or more than one → STOP.
+- **APPROVED from `/team-build` is NOT terminal.** When the inner
+  skill returns APPROVED, the outer `/planbooq-team-build` MUST
+  still run §3d → §3d.5 (commit + push the Playwright report zip
+  to the PR branch) → §3e (post APPROVED comment with PR link +
+  report URL, transition status → `Review`, PATCH `prUrl`). The
+  single most common failure mode of this skill is the outer runner
+  treating an APPROVED return as "ticket done" and jumping to the
+  next ticket — leaving Planbooq with no APPROVED comment, no
+  report link, no status move. The PR exists on GitHub but the
+  ticket looks abandoned. **Self-test before writing any closing
+  summary**: for the ticket you just dispatched, can you confirm a
+  Planbooq comment was posted from §3e AND the ticket's status is
+  `Review` (or `Todo` for failures), AND phase labels (`Building`,
+  `Testing`) are cleared? If you can't answer "yes" to all three
+  with concrete evidence in your conversation history, you skipped
+  §3d.5/§3e — STOP and run them now. The §3c post-dispatch
+  checklist and the §5 precondition gate exist specifically to
+  prevent this.
 - **No branch/PR reuse.** Branch name and PR number must be unique
   across the run.
 - **Clean-code bar is part of the contract.** The §3a clause is
@@ -746,9 +1180,9 @@ persist for manual debugging.
   `Todo`**.
 - **All Planbooq reads/writes go through the REST API at
   `${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1` with
-  `Bearer $PLANBOOQ_API_KEY`.** No MCP,
-  no SDK, no scraping the web UI. Always check `.ok` on the response
-  envelope before reading `.data`.
+  `Bearer $PLANBOOQ_API_KEY`.** No MCP, no SDK, no scraping the
+  web UI. Always check `.ok` on the response envelope before
+  reading `.data`.
 - Always resolve IDs via list endpoints before creating — never
   guess.
 - Honour Planbooq's payload constraints: title ≤200, description
@@ -760,5 +1194,21 @@ persist for manual debugging.
 - If `gh auth status` fails, abort before touching git.
 - Don't open more than 10 PRs per run unless the user explicitly
   raised `--limit` past 10.
-- **Screenshots for UX/design tickets (§3d.5) are best-effort, never
-  blocking.**
+- **§3d.5 is mandatory for any UI-bearing ticket.** Detection is by
+  frontend-shaped diff, design label, or UI keywords. The
+  Playwright report zip must be located (preferring the project's
+  Playwright/Cypress E2E with `video: "on"` via override config,
+  falling back to repo `.team-build/capture.sh`, falling back to
+  the synthetic Playwright walkthrough), committed to the PR
+  branch under `.planbooq-team-build/shots/<identifier>/`, and
+  pushed. The §3e comment links it via `raw.githubusercontent.com`.
+  If `/team-build` skipped capture under the autonomous push-policy,
+  §3d.5 itself runs the capture script — do not waive silently.
+  **"No UI surface mutation" is NOT a valid waiver reason** — the
+  capture trigger is the §3d.5 detection regex, not the agent's
+  judgment about whether the change "feels visual." The only
+  acceptable miss is a hard structural failure (no E2E config, dev
+  server won't boot after 5min); in that case post
+  `_Playwright report not captured: <reason>_` AND a follow-up
+  TODO comment naming what setup is needed. Never fabricate an
+  image.
