@@ -634,18 +634,41 @@ Linear's suggested working branch (when present) as `--working-branch`:
 build, security, QA, push, PR). It returns APPROVED-and-shipped,
 ESCALATED, or FAILED.
 
-> **APPROVED is NOT terminal for THIS skill.** When `/team-build`
-> returns APPROVED, the inner skill is done — but `/linear-team-build`
-> is not. **You MUST continue through §3d (capture outcome), §3d.5
-> (upload visual assets to Linear), §3e (post the APPROVED comment
-> with PR link + screenshots, transition state → In Review), and only
-> then move on to the next ticket.** Skipping §3d.5/§3e because
-> `/team-build` "succeeded" is the most common failure mode of this
-> skill — observed in real runs where the outer runner declared the
-> ticket finished and Linear was left with no APPROVED comment, no
-> screenshots, no state transition. APPROVED from the inner skill
-> means "build shipped, now publish the result back to Linear" — not
-> "we're done." Treat returning early after `/team-build` as a bug.
+> ## ⛔ STOP — post-dispatch checklist (read every time `/team-build` returns)
+>
+> The single most common failure mode of this skill is the outer
+> runner treating an APPROVED return as "ticket done" and writing a
+> closing summary right here. **APPROVED from `/team-build` means
+> "build shipped, now publish the result back to Linear" — not "we're
+> done."** The inner skill's APPROVED applies to *its* contract; the
+> outer ticket isn't closed until §3d → §3d.5 → §3e have all run.
+>
+> Before writing ANY user-facing text after `/team-build` returns,
+> mentally tick this checklist for the ticket you just dispatched:
+>
+> 1. [ ] §3c isolation check ran (`gh pr list` shows exactly one new
+>        PR with the right head ref).
+> 2. [ ] §3d outcome captured (PR URL, PR number, branch, worktree,
+>        verdict, rounds, `$ISSUE_ID`, `$TEAM_ID`).
+> 3. [ ] §3d.5 ran for any UI-bearing diff: artifacts located OR
+>        captured inline, then uploaded to Linear via `fileUpload`
+>        (asset URLs recorded). For non-UI diffs, explicitly noted
+>        "no UI surface" instead of skipping silently.
+> 4. [ ] §3e Linear comment posted (URL captured) AND state
+>        transitioned (`In Review` for APPROVED, `Todo` for
+>        ESCALATED/FAILED). Phase labels (`Building`, `Testing`)
+>        cleaned up.
+>
+> If ANY box is unticked, you are not allowed to:
+> - Move to the next ticket in the queue.
+> - Write the §5 final summary.
+> - Write any "## /team-build — APPROVED" / "wrap up" message.
+>
+> Do the missing step first, then resume. Writing a closing summary
+> with unticked boxes is the bug this checklist exists to prevent.
+> Past failures: an APPROVED build whose Linear ticket got no comment,
+> no screenshots, and stayed stuck in "In Progress" because the outer
+> runner jumped straight to summary. Don't be that run.
 
 After it returns, verify isolation:
 - `gh pr list` must now show **exactly one** new open PR vs.
@@ -897,17 +920,36 @@ effective concurrency exceeds 5, warn the user about shared
 
 ## 5. Final summary
 
+> **Precondition gate — do not write this section yet if any row is
+> incomplete.** Before producing the summary, walk every ticket row in
+> your head and confirm BOTH of these hold for each one:
+>
+> - The "PR / Next step" cell contains a real GitHub PR URL (for
+>   APPROVED) or an explicit non-URL reason (for ESCALATED / FAILED /
+>   DESIGN_HANDOFF / AWAITING_HUMAN / SKIPPED / DESIGN_FAILED).
+> - A Linear comment URL exists in your captured §3e output for that
+>   ticket (the `linear issue comment add` call printed
+>   `https://linear.app/.../comment-XXXXX`). If you can't point to
+>   that URL right now, §3e didn't run for that ticket.
+>
+> If either is missing for any row, STOP and finish §3d.5 + §3e for
+> the offending ticket(s) FIRST, then come back and write the summary.
+> A summary written with missing Linear comments is the same bug as
+> "skipping §3e because /team-build returned APPROVED" — the §3c
+> post-dispatch checklist exists to prevent it; this gate is the
+> backstop.
+
 ```
 ## /linear-team-build — summary
 Processed: N tickets
 
-| Ticket   | Verdict          | PR / Next step                                | Rounds |
-|----------|------------------|-----------------------------------------------|--------|
-| ENG-123  | APPROVED         | https://github.com/.../pull/45                | 1      |
-| ENG-130  | ESCALATED        | (no PR — see worktree)                        | 3      |
-| ENG-141  | DESIGN_HANDOFF   | label `Choose Design` — pick variant          | —      |
-| ENG-142  | AWAITING_HUMAN   | already in `Choose Design` — skipped          | —      |
-| ENG-150  | DESIGN_FAILED    | /linear-design errored — see ticket comment   | —      |
+| Ticket   | Verdict          | PR / Next step                                | Linear comment | Rounds |
+|----------|------------------|-----------------------------------------------|----------------|--------|
+| ENG-123  | APPROVED         | https://github.com/.../pull/45                | linear.app/.../comment-abc123 | 1      |
+| ENG-130  | ESCALATED        | (no PR — see worktree)                        | linear.app/.../comment-def456 | 3      |
+| ENG-141  | DESIGN_HANDOFF   | label `Choose Design` — pick variant          | linear.app/.../comment-ghi789 | —      |
+| ENG-142  | AWAITING_HUMAN   | already in `Choose Design` — skipped          | (none — §3-route skip) | —      |
+| ENG-150  | DESIGN_FAILED    | /linear-design errored — see ticket comment   | linear.app/.../comment-jkl012 | —      |
 
 Worktrees still on disk:
 - ESCALATED/FAILED build worktrees (APPROVED are auto-cleaned by /team-build §6a):
@@ -1005,9 +1047,16 @@ on disk waiting for a decision.
   the outer runner treating an APPROVED return as "ticket done" and
   jumping to the next ticket — leaving Linear with no APPROVED
   comment, no screenshots, no state move. The PR exists on GitHub
-  but the ticket looks abandoned. If you find yourself about to
-  declare a ticket complete right after `/team-build` returns,
-  STOP — you skipped §3d.5 and §3e.
+  but the ticket looks abandoned. **Self-test before writing any
+  closing summary**: for the ticket you just dispatched, can you
+  paste the Linear comment URL from §3e (`linear.app/.../comment-...`)
+  AND confirm the ticket's state is `In Review` (or `Todo` for
+  failures), AND confirm phase labels (`Building`, `Testing`) are
+  cleared? If you can't answer "yes" to all three with concrete
+  evidence in your conversation history, you skipped §3d.5/§3e —
+  STOP and run them now. The §3c post-dispatch checklist and the §5
+  precondition gate exist specifically to prevent this; if you find
+  yourself bypassing both, that's the bug to fix.
 - **Linear `fileUpload` PUT requires explicit `Content-Type: $CT`.**
   The signed GCS URL is bound to the exact `contentType` argument
   passed to the `fileUpload` mutation. The `headers[]` array Linear
