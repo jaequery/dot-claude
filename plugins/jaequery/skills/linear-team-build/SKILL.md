@@ -301,14 +301,38 @@ even when `--working-branch` overrides the branch name.
 
 ### 3b. Move the ticket to "In Progress" + post a "starting" comment
 
-Before launching, transition the ticket:
+Before launching, transition the ticket. **Resolve the target state
+explicitly — never pass `--state "In Progress"` blindly.** The CLI
+fuzzy-matches and on a team without an exact "In Progress" can land
+in something downstream like "In Review" or worse. Mirror the §3e
+pattern, scoped to the `started` type group:
+
 ```bash
-linear issue update "$IDENT" --state "In Progress"
+TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
+STATES_JSON=$(linear api '
+  query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
+' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
+
+# Pick the first In-Progress-flavored started state. NEVER cross into
+# `completed` (Done, Ready for Deployment, Shipped) or `unstarted`.
+PROGRESS_STATE=$(echo "$STATES_JSON" \
+  | jq -r '[.data.team.states.nodes[]
+            | select(.type=="started")
+            | select(.name | test("^(In Progress|Building|In Development|Started|Doing)$"; "i"))]
+            | .[0].name // empty')
+
+if [ -n "$PROGRESS_STATE" ]; then
+  linear issue update "$IDENT" --state "$PROGRESS_STATE" \
+    || echo "warning: failed to move $IDENT to $PROGRESS_STATE; continuing"
+else
+  echo "warning: team $TEAM_KEY has no In-Progress-style started state; leaving $IDENT in Todo"
+fi
 ```
-The CLI matches state name on the issue's team. If the team has no
-state named "In Progress" but has another `started`-type state, retry
-with that name. On any failure, log a warning and continue —
-do not block the build on Linear state.
+
+The `select(.type=="started")` filter is load-bearing — it prevents
+the CLI from ever fuzzy-matching into a `completed` or `unstarted`
+state. On any failure, log a warning and continue — do not block the
+build on Linear state.
 
 Then post a status comment so non-terminal stakeholders can follow
 along. Write to a temp file and use `--body-file`:
@@ -606,6 +630,19 @@ worktrees here — they are already gone.
 
 ## Hard rules
 
+- **The dispatch skill is `/team-build`. Always. No exceptions.**
+  Never substitute `/team-design`, `/team-build-design`, `/dda`, or
+  any other skill — even when the ticket title contains "design",
+  "variants", "explore", "look", "rebrand", or other design-flavored
+  language. The contract of this skill is "burn down a Linear
+  backlog by shipping one PR per ticket via /team-build." If the
+  user wants parallel design exploration, they invoke `/team-design`
+  or `/linear-design` directly. If a ticket genuinely needs
+  divergent variants, that's a `/team-build` whose Team Lead can
+  decide to dispatch a Design Lead subagent — but the top-level
+  skill call is still `/team-build`. Substituting at the
+  /linear-team-build layer breaks the one-PR-per-ticket guarantee
+  and produces N branches per ticket.
 - **One PR per ticket. ONE Skill-tool call to `/team-build` per
   ticket.** Never bundle multiple tickets into one PR, branch,
   worktree, or team-build invocation.
