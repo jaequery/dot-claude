@@ -630,22 +630,20 @@ worktrees here — they are already gone.
 
 ## Hard rules
 
-- **The dispatch skill is `/team-build`. Always. No exceptions.**
-  Never substitute `/team-design`, `/team-build-design`, `/dda`, or
-  any other skill — even when the ticket title contains "design",
-  "variants", "explore", "look", "rebrand", or other design-flavored
-  language. The contract of this skill is "burn down a Linear
-  backlog by shipping one PR per ticket via /team-build." If the
-  user wants parallel design exploration, they invoke `/team-design`
-  or `/linear-design` directly. If a ticket genuinely needs
-  divergent variants, that's a `/team-build` whose Team Lead can
-  decide to dispatch a Design Lead subagent — but the top-level
-  skill call is still `/team-build`. Substituting at the
-  /linear-team-build layer breaks the one-PR-per-ticket guarantee
-  and produces N branches per ticket.
-- **One PR per ticket. ONE Skill-tool call to `/team-build` per
-  ticket.** Never bundle multiple tickets into one PR, branch,
-  worktree, or team-build invocation.
+- **§3b runs BEFORE any dispatch skill, no matter which one.** The
+  ticket must show "In Progress" (or the team's equivalent
+  `started`-type state) the entire time the build is running, so
+  human observers in Linear can see something is happening. This
+  applies to `/team-build`, `/team-design`, or any other dispatch
+  skill — moving the ticket is a precondition of dispatch, not
+  something delegated to the dispatched skill. If §3b is silently
+  skipped because the skill jumped straight to dispatch, that's the
+  bug to fix — re-read §3b and run it.
+- **One PR per ticket. ONE Skill-tool call to the dispatch skill
+  per ticket** (typically `/team-build`; `/team-design` is allowed
+  for design-flavored tickets where divergent variants are wanted).
+  Never bundle multiple tickets into one PR, branch, worktree, or
+  dispatch invocation.
 - **Verify isolation between tickets.** Snapshot `gh pr list` before
   each call; confirm exactly one new PR with head ref
   `team-build/<ticket-slug>-*` after. Zero or more than one → STOP.
