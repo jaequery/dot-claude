@@ -71,6 +71,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
 - [`/github-team-build`](#github-team-build) — Burn down the **Todo** column of a GitHub Project (v2) kanban board: one `/team-build` invocation per issue, one PR per issue (auto-closes via `Closes #<n>`); auto-creates the project if missing.
 - [`/planbooq-team-build`](#planbooq-team-build) — Burn down a Planbooq (homebrew Linear clone) "Todo" column via Planbooq's REST API at `https://planbooq.vercel.app`: one `/team-build` invocation per ticket, one PR per ticket; status auto-flips to `Review` once the PR is up.
+- [`/linear-merge-all`](#linear-merge-all) — Burn down the Linear **In Review** queue: find each ticket's GitHub PR, `gh pr merge` sequentially, auto-resolve merge conflicts in a throwaway worktree, transition the ticket to a `completed`-type state on success.
 - [`/linear-design`](#linear-design) — File a Linear ticket for a design task, run `/team-design`, post each variant's screenshots back as comments on the ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
@@ -212,6 +213,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Resolves the `personal` workspace and `tierbuddy` project, validates the board has `Todo` / `Building` / `Review` columns, pulls the top 5 tickets currently in Todo, processes each sequentially: own worktree, own branch (`pbq-123-add-oauth-login`), own PR with the Planbooq backlink. Status moves Todo → Building → Review per ticket; final table shows verdicts and PR URLs.*
+
+---
+
+### `/linear-merge-all`
+
+**What it does.** Pulls every Linear ticket sitting in **In Review** (or the team's equivalent — `Code Review`, `Reviewing`, `PR Review`, `Ready for Review`), finds each ticket's linked GitHub PR, and merges them **sequentially** with `gh pr merge`. On merge conflicts, fetches the PR branch into a throwaway worktree, rebases against the target, **resolves conflicts in place** (mechanical conflicts auto-resolved; semantic conflicts ESCALATED with a Linear comment), force-pushes with `--force-with-lease`, and retries the merge. After each successful merge, transitions the Linear ticket to the team's first `completed`-type state (`Done` / `Merged` / `Shipped` / `Released` / `Completed`) and refreshes local `main` so the next PR rebases against the just-merged change.
+
+**When to use.** You have a stack of human-reviewed tickets in `In Review` and want to land them in one pass without manually clicking merge on each PR — especially when later PRs in the queue need to rebase against earlier ones to stay clean.
+
+**How to invoke.** `/linear-merge-all [flags]`. Flags: `--team <key>` (Linear team), `--assignee <me|email|userId>`, `--limit <n>` (default 50), `--target <branch>` (only merge PRs whose **base** matches; default: repo's default branch), `--method <squash|merge|rebase>` (default `squash`), `--admin` (pass `--admin` to `gh pr merge` to bypass branch protection), `--state <name>` (override In-Review-state auto-detect), `--state-after <name>` (override completed-state auto-detect), `--no-state-update` (post the comment but leave the ticket in its current state — for downstream automation that owns the transition), `--skip-conflicts` (skip rather than resolve conflicts), `--dry-run` (list what would be merged with each PR's mergeable status). Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once), authed `gh`, and `jq`.
+
+**What you get.** Numbered queue with per-PR mergeable status (`CLEAN` / `BEHIND` / `DIRTY` / `BLOCKED` / `UNSTABLE` / `UNKNOWN`) → per-PR sequential loop (re-check status right before merge → branch by status: BEHIND → `gh pr update-branch` → CLEAN → `gh pr merge --<method> --delete-branch` → DIRTY → conflict-resolution worktree at `../<repo>.lma-pr-<number>` → rebase against latest base → AI-resolves mechanical conflicts (lockfiles regenerated via the project's package manager, whitespace/import collisions auto-merged) → ESCALATES semantic conflicts with a Linear comment naming the file and reason → runs `lint` / `tsc --noEmit` sanity checks if available before force-pushing → re-attempts merge → on success: posts `### ✅ merged by /linear-merge-all` comment with PR URL, method, merge SHA, and conflict notes if any → transitions Linear to first `completed`-type state) → final results table with `MERGED` / `BLOCKED` / `DRAFT` / `NO_PR` / `WRONG_BASE` / `CONFLICTED` / `ESCALATED` / `MERGE_FAILED` verdicts. ESCALATED worktrees stay on disk so the human can pick up where the bot stopped.
+
+**How it works.** All Linear interactions go through the `linear` CLI (state list cached per-team in `/tmp/lma-cache-$$/states-<TEAM_KEY>.json`, issue JSON cached per ticket — never re-fetched). All GitHub interactions go through `gh` (`gh pr view --json mergeable,mergeStateStatus`, `gh pr merge`, `gh pr update-branch`, `gh pr list --search` as PR-resolution fallback when Linear's `attachments.nodes[]` doesn't contain a github.com/.../pull/N URL). State resolution is filtered by `WorkflowState.type` so the auto-detect *can never* fuzzy-match into the wrong group — input state must be `type=="started"` and a `review`-flavored name; output state must be `type=="completed"`. **Sequential only** — the per-PR loop is not parallelized, because PR N+1 may rebase cleanly only because PR N landed first; parallelism would race on `main` updates and undo the conflict-avoidance benefit of running the queue in priority order. After each merge, `git fetch origin <base>` updates the ref tracking origin (and fast-forwards the local checkout if the user happens to be on the base branch) so §4a's mergeable re-check on the next PR sees the new HEAD. Hard rules: never push to `main` directly (always via `gh pr merge`), never `git push --force` without `--with-lease`, never `--no-verify`, never resolve conflicts in the main working tree (always in a throwaway worktree), never transition a Linear ticket to a non-`completed`-type state as the post-merge transition. **This skill IS the human merge action** — unlike `/linear-team-build` where the bot must stop at `In Review` (because moving past it would silently ship unreviewed code), `/linear-merge-all` is invoked by a human who has already reviewed the work and is explicitly asking to ship it.
+
+**Example.**
+
+```
+/linear-merge-all --team ENG --method squash
+```
+
+*Pulls every ENG-team ticket in `In Review`, sorts oldest-first within priority, processes each sequentially: re-checks PR status, squash-merges if CLEAN, runs `gh pr update-branch` if BEHIND, spins up a `lma-pr-<n>` worktree to rebase + resolve if DIRTY, posts a merge comment to Linear with the PR URL and merge SHA, transitions the ticket to `Done`, refreshes local `main`, then moves to the next ticket. Final table shows MERGED / ESCALATED / SKIPPED counts and lists any worktrees still on disk for the human to clean up.*
 
 ---
 
