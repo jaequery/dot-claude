@@ -282,6 +282,17 @@ Push policy for this run (non-negotiable):
   remaining issues in the PR body so a human can review on GitHub.
 - This is autonomous Linear backlog burndown; treat the PR itself as
   the review surface, not a local gate.
+- **Evidence capture is NOT skipped.** The push-policy override only
+  waives the typed-`yes` gate and the APPROVED-loop. You MUST still
+  execute the §5a capture script inline (Playwright/Cypress E2E with
+  `video: "on"` if configured, else the synthetic walkthrough) for
+  any UI-bearing diff and commit the resulting
+  `$WT_PATH/.team-build/evidence/` directory before pushing. If
+  capture fails (no E2E config AND synthetic boot fails), surface the
+  reason in the PR body and the §3e Linear comment as
+  `_Walkthrough not captured: <reason>_` — never silently omit it.
+  Linear-team-build's §3d.5 step depends on these artifacts existing
+  on disk.
 ```
 
 Slug for the worktree path: `$IDENT` lowercased (e.g. `eng-123`).
@@ -368,12 +379,16 @@ rounds run. Also capture `$ISSUE_ID` (UUID) and `$TEAM_ID` (UUID) from
 
 ### 3d.5. Visual asset reuse (UX/design tickets only)
 
-**Capture happens during QA in `/team-build` §5a, not here.** This
-section just locates the artifacts that QA already produced and
-uploads them to Linear. No dev server boot, no second worktree.
+**Capture happens during QA in `/team-build` §5a.** This section
+locates the artifacts that QA produced and uploads them to Linear.
+If they aren't on disk (autonomous push-policy mode skipped capture,
+or capture genuinely failed), this section runs the §5a capture
+script itself before uploading — UI tickets without a walkthrough
+are not acceptable.
 
-Only runs when verdict is **APPROVED** AND the ticket touches the UI.
-Otherwise skip this section entirely.
+Runs when **any** of: ticket touches the UI (per detection rules
+below), verdict is APPROVED, or verdict is ESCALATED but a PR was
+opened. The only skip condition is "no UI surface in the diff."
 
 **Detection (any one fires):**
 1. The PR diff contains frontend-shaped files (`gh pr diff "$PR_NUMBER" --name-only`
@@ -410,12 +425,44 @@ worktree at `$WORKING_BRANCH` to access the committed evidence
 artifacts are committed to the branch by §5.5, so they're guaranteed
 to exist on disk if §5a succeeded.
 
-**Failure modes:**
-- `$WEBM` and all `$PNGS` missing → §5a flagged "capture failed" and
-  Team Lead waived. Note `_Walkthrough not captured: <reason from §6 final report>_`
-  in the §3e comment and skip uploads.
-- Some assets missing → upload what exists. The QA agent already
-  decided this was sufficient when it produced APPROVED.
+**If artifacts are missing — run capture here, do not skip.**
+
+When `$WEBM` and all `$PNGS` are missing, do NOT silently waive.
+The autonomous push-policy block in §3a explicitly forbids skipping
+capture, so missing artifacts mean either /team-build skipped §5a
+(bug — surface it) or the worktree was already cleaned. Recover:
+
+1. **Re-materialize the worktree if needed.** If `$WT` no longer
+   exists (cleaned by /team-build §6a after PR open), create a
+   read-only worktree at `$WORKING_BRANCH`:
+   ```bash
+   SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.ltb-evidence-$IDENT_LOWER-$$"
+   git -C "$REPO_ROOT" worktree add --detach "$SHOT_WT" "origin/$WORKING_BRANCH"
+   WT="$SHOT_WT"  # rebind for the rest of §3d.5
+   ```
+   If §5.5 already committed evidence to the branch, it'll appear
+   under `$WT/.team-build/evidence/` and you can skip to upload.
+2. **Run the §5a capture script inline from this skill.** Read
+   `/team-build` §5a, follow its capture-resolution order
+   (Playwright with override config → Cypress → repo
+   `.team-build/capture.sh` → `package.json` `team-build.capture` →
+   `pnpm install && pnpm db:migrate && pnpm db:seed && pnpm dev` +
+   synthetic walkthrough). Use the same `$EVID` path. Cap total
+   capture time at 5 minutes; on hard timeout, give up and proceed
+   to step 3.
+3. **If still nothing:** post the §3e comment with
+   `_Walkthrough not captured: <one-line reason>_` AND open a
+   follow-up TODO comment on the Linear ticket explaining what
+   needs to be set up (Playwright config? `.team-build/capture.sh`?)
+   so the next run captures cleanly. This is the only path that
+   ships UI work without a walkthrough — and it must be loud.
+
+Some assets missing (e.g. `.webm` exists but PNGs don't, or vice
+versa) → upload what exists. Do not re-run capture for partial
+results.
+
+Clean up the temp worktree at the end of §3d.5 if step 1 created
+one: `git worktree remove --force "$SHOT_WT"`.
 
 **Upload to Linear** (mirrors `/linear-design` §4a). For each asset
 (`.webm` first if present, else the PNGs in numeric order), set
@@ -543,11 +590,15 @@ worktrees here — they are already gone.
   isn't authed, abort before touching Linear.
 - Don't open more than 10 PRs per run unless the user explicitly
   raised `--limit` past 10.
-- **Screenshots for UX/design tickets (§3d.5) are best-effort, never
-  blocking.** Detection is by frontend-shaped diff, design label, or
-  UI keywords in the ticket. Capture with Playwright after a local
-  dev-server boot, upload via Linear's `fileUpload` mutation, and
-  embed in the APPROVED comment. Failure modes (no dev server,
-  capture error, upload non-2xx) downgrade to a `_Screenshots not
-  captured: <reason>_` line — never abort the ticket and never
-  fabricate an image.
+- **§3d.5 is mandatory for any UI-bearing ticket.** Detection is by
+  frontend-shaped diff, design label, or UI keywords. The
+  walkthrough+stills must be captured (preferring the project's
+  Playwright/Cypress E2E with `video: "on"` via override config,
+  falling back to repo `.team-build/capture.sh`, falling back to the
+  synthetic Playwright walkthrough) and uploaded via Linear's
+  `fileUpload` mutation. If `/team-build` skipped capture under the
+  autonomous push-policy, §3d.5 itself runs the capture script — do
+  not waive silently. The only acceptable miss is a hard structural
+  failure (no E2E config, dev server won't boot after 5min); in that
+  case post `_Walkthrough not captured: <reason>_` AND a follow-up
+  TODO comment naming what setup is needed. Never fabricate an image.
