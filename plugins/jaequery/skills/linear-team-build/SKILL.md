@@ -502,8 +502,44 @@ multi-line markdown survives shell quoting.
 - **APPROVED + PR opened:**
   ```bash
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
-  linear issue update  "$IDENT" --state "In Review"   # falls back to leaving in "In Progress" if not present
   ```
+  **State transition — must land on "In Review", never anything
+  downstream of human review.** Do NOT pass `--state "In Review"`
+  blindly; the CLI fuzzy-matches and has been observed landing on
+  `"Ready for Deployment"` or other post-review states when the team
+  lacks an exact `"In Review"`. That's wrong — `Ready for Deployment`
+  is a *human* signal that a reviewer approved the PR, not a robot
+  signal that a PR exists. Resolve explicitly:
+
+  ```bash
+  # Pull the team's actual state list (states are team-scoped).
+  TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
+  STATES_JSON=$(linear api '
+    query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
+  ' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
+
+  # Pick the first match in priority order from the `started` group only —
+  # never cross into `completed` (Done, Ready for Deployment, Shipped, Merged).
+  TARGET_STATE=$(echo "$STATES_JSON" \
+    | jq -r '[.data.team.states.nodes[]
+              | select(.type=="started")
+              | select(.name | test("^(In Review|Code Review|Reviewing|PR Review)$"; "i"))]
+              | .[0].name // empty')
+
+  if [ -n "$TARGET_STATE" ]; then
+    linear issue update "$IDENT" --state "$TARGET_STATE"
+  else
+    # No review-flavored started state exists. Stay in "In Progress" and
+    # surface it — DO NOT fall through to a completed-type state.
+    echo "Linear team $TEAM_KEY has no In-Review-style state; leaving $IDENT in In Progress."
+  fi
+  ```
+
+  The `select(.type=="started")` filter is the load-bearing line: it
+  prevents the script from ever picking `Ready for Deployment`,
+  `Shipped`, `Done`, or any other `completed`-type state, regardless
+  of how the team named it. Robots only move tickets through
+  `unstarted → started`; humans move them out of `started`.
   Comment body: the PR URL plus a one-line summary. **If §3d.5
   produced uploaded assets, append a `### Walkthrough` section.** If a
   `.webm` or `.mp4` walkthrough was uploaded, embed it first as
@@ -524,9 +560,10 @@ multi-line markdown survives shell quoting.
   Comment body: blocker summary, worktree path, and remediation notes.
   Never mark done.
 
-If `linear issue update --state "In Review"` fails because the team
-lacks that state, leave the ticket in "In Progress" and note it in
-the results table.
+If no review-flavored `started` state exists on the team (per the
+APPROVED block above), leave the ticket in "In Progress" and note
+it in the results table. Never let the ticket land in a
+`completed`-type state from this skill — that's a human's call.
 
 ### 3f. Decide whether to continue
 
