@@ -615,25 +615,51 @@ APPROVED precondition per §5 step 3. This replaces the post-APPROVED
 
    **Force video on without mutating the tracked config.** Write a
    temp override config that extends the project's, then pass it via
-   `--config`:
+   `--config`. There are four load-bearing details — every one of
+   them has shipped a broken capture run before.
    ```bash
    EVID="$WT_PATH/.team-build/evidence"
    mkdir -p "$EVID"
-   cat > /tmp/tb-pw-override-$$.config.mjs <<EOF
-   import base from "$PW_CFG";
-   const cfg = base.default ?? base;
+   # Strip the trailing ".ts"/".js"/".mjs" — TS module imports use the
+   # bare specifier, and Playwright's loader resolves it.
+   PW_CFG_BARE="${PW_CFG%.*}"
+   # The override MUST be a .ts file (NOT .mjs). Reason: when the
+   # project's config is `playwright.config.ts`, Node's ESM loader
+   # cannot import a .ts file directly, and a .mjs override that
+   # imports the .ts config fails with `SyntaxError: Cannot use import
+   # statement outside a module`. A .ts override is loaded by
+   # Playwright's own TS-aware module loader, which handles both.
+   cat > /tmp/tb-pw-override-$$.config.ts <<EOF
+   import base from "$PW_CFG_BARE";
+   const cfg: any = (base as any).default ?? base;
+   const FORCED_USE = {
+     video: "on" as const,
+     screenshot: "on" as const,
+     trace: "on" as const,
+     // Force headless — QA runs in background and must never spawn
+     // a visible browser window.
+     headless: true,
+     launchOptions: { ...(cfg.use?.launchOptions ?? {}), headless: true },
+   };
    export default {
      ...cfg,
-     use: {
-       ...(cfg.use ?? {}),
-       video: "on",
-       screenshot: "on",
-       trace: "on",
-       // Force headless regardless of project config — QA runs in
-       // background and must never spawn a visible browser window.
-       headless: true,
-       launchOptions: { ...(cfg.use?.launchOptions ?? {}), headless: true },
-     },
+     // Top-level use is layered FIRST in Playwright config; projects[].use
+     // overrides it. So we must apply FORCED_USE to BOTH levels — otherwise
+     // \`video: "on"\` is silently overridden by any project that sets its
+     // own \`use\` block (very common — \`...devices["Desktop Chrome"]\`).
+     use: { ...(cfg.use ?? {}), ...FORCED_USE },
+     projects: (cfg.projects ?? []).map((p: any) => ({
+       ...p,
+       use: { ...(p.use ?? {}), ...FORCED_USE },
+     })),
+     // webServer.cwd defaults to the directory the config file lives in.
+     // Our override is in /tmp, so without an explicit cwd, \`pnpm exec\`
+     // commands fail with ERR_PNPM_RECURSIVE_EXEC_NO_PACKAGE because /tmp
+     // isn't a workspace. Pin cwd back to the project's package directory.
+     webServer: cfg.webServer ? {
+       ...cfg.webServer,
+       cwd: "$PW_DIR",
+     } : undefined,
      reporter: [
        ["list"],
        ["html", { outputFolder: "$EVID/playwright-report", open: "never" }],
@@ -650,10 +676,41 @@ APPROVED precondition per §5 step 3. This replaces the post-APPROVED
    ```bash
    ( cd "$PW_DIR" && \
      pnpm exec playwright test \
-       --config="/tmp/tb-pw-override-$$.config.mjs" \
+       --config="/tmp/tb-pw-override-$$.config.ts" \
        ${GREP:+--grep "$GREP"} \
        || echo "playwright tests failed" )
    ```
+
+   **⚠️ Manually-created browser contexts bypass `video: "on"`.**
+   Playwright's config-level `video` only applies to contexts the
+   test runner creates automatically. If the project has an E2E
+   fixture that does `await browser.newContext()` (no options) — a
+   common pattern for custom auth flows like better-auth's `authAs`
+   helper — the video config does NOT propagate, and no `.webm` is
+   produced even when the run is otherwise healthy. Symptoms: traces
+   and `test-finished-1.png` appear in `playwright-output/` but no
+   `.webm` files exist. Three options, in order of preference:
+
+   1. **Detect early and add explicit screenshots to the spec.** The
+      §5.5 visual evidence accepts step screenshots in lieu of a
+      walkthrough video (see §5.5 "CLI / backend / infra" exception
+      for cases where video can't be produced). Add 3-5
+      `await page.screenshot({ path: ... })` calls at key states.
+      Path: write to `$EVID` directly so they land alongside the
+      override's `outputDir`.
+   2. **Modify the fixture once.** Pass `recordVideo: { dir, size }`
+      into `browser.newContext()` so the project's auth-aware
+      contexts record. This is a one-line shared-test-infra change
+      and the right long-term fix; only do it if the user authorizes
+      touching shared test code.
+   3. **Synthetic fallback.** Drop to the synthetic walkthrough
+      below (option 4), which records its own context and bypasses
+      the project's fixture entirely. Skips real auth — useful for
+      pages that work logged-out, useless for protected routes.
+
+   Detection heuristic: after the run, if `playwright-output/` has
+   PNGs and `trace.zip` but zero `.webm` files, the project's
+   fixtures bypassed video — fall through to option 1.
 
    **Harvest.** Every test now records a `.webm` and screenshots
    (because `video: "on"` + `screenshot: "on"`). Extract just the
@@ -904,13 +961,24 @@ in the same section instead of omitting it.
    opened (the branch lives on origin and locally), remove the worktree
    automatically — no question:
    ```
+   # Sweep transient capture artifacts FIRST. Playwright's html report,
+   # output dir, and node-side traces are large untracked trees that
+   # routinely block `worktree remove` (it refuses on untracked content
+   # by default). They're fully reconstructible from another capture run,
+   # and the actionable artifacts (the numbered step screenshots committed
+   # to .team-build/evidence/*.png) are already on origin.
+   rm -rf "$WT_PATH/.team-build/evidence/playwright-output" \
+          "$WT_PATH/.team-build/evidence/playwright-report" \
+          "$WT_PATH/.team-build/evidence/cypress" 2>/dev/null
    git -C "$REPO_ROOT" worktree remove "$WT_PATH"
    git -C "$REPO_ROOT" branch -d "$BRANCH"   # safe delete; skip if it fails (unmerged)
    ```
-   Print one line confirming both. If `worktree remove` fails (e.g.
-   uncommitted changes survived push), fall back to asking the user
-   whether to force-remove or keep — do not silently leave artifacts
-   without flagging.
+   Print one line confirming both. If `worktree remove` STILL fails
+   after the sweep (means real uncommitted changes survived push), fall
+   back to asking the user whether to force-remove or keep — do not
+   silently leave artifacts without flagging. In autonomous-push mode
+   (e.g. invoked by `/linear-team-build`), force-remove is the right
+   call after the sweep — log the reason but don't block on it.
 12. **Drop the per-worktree DB** if §1.5 created one. Run from
     `$REPO_ROOT` against the same compose service:
     - **Postgres:**

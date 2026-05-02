@@ -438,6 +438,27 @@ Two distinct branches matter per ticket:
   generate its default `team-build/<slug>-<ts>`. **Never** prepend
   `team-build/` to Linear's suggested name — pass it verbatim through
   `--working-branch`.
+
+  **Poisoned-branch case.** If Linear's suggested `branchName` already
+  exists on origin AND has a closed-not-merged PR against it, do NOT
+  reuse it — the ref points to commits the human already rejected, and
+  pushing on top would either silently build on the rejected work or
+  collide. Detect:
+  ```bash
+  EXISTS_ON_ORIGIN=$(git ls-remote --heads origin "$WORKING_BRANCH" | head -1)
+  if [ -n "$EXISTS_ON_ORIGIN" ]; then
+    PRIOR_PR=$(gh pr list --state all --head "$WORKING_BRANCH" \
+      --json number,state,mergedAt --limit 1 \
+      | jq -r '.[0] | select(.state=="CLOSED" and .mergedAt==null) | .number')
+  fi
+  ```
+  If `PRIOR_PR` is non-empty, treat the Linear `branchName` as
+  unusable and **fall back to /team-build's auto-generated default**
+  (omit `--working-branch` from the dispatch). The closed PR's branch
+  stays untouched; the new attempt gets a clean
+  `team-build/<slug>-<ts>` branch. Note the fallback explicitly in
+  the §3b "team-build started" comment so the human sees why the
+  branch isn't following the Linear-suggested pattern.
 - **`$RESOLVED`** — the PR base / target branch (where the PR merges
   into). Resolve in the order below; first match wins.
 
