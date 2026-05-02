@@ -193,15 +193,74 @@ UI heuristic for path 2 (any one fires):
 Print the route decision per ticket, e.g.
 `ENG-123 → route=DESIGN_EXPLORATION (label "needs-design")`.
 
-### 3-announce. Post a "picked up" comment BEFORE any work
+### 3-state. Move state to "In Progress" FIRST — before any comment
+
+**State change is the very first mutation on the ticket.** The
+moment §3-route says we're going to do real work (route is BUILD
+or DESIGN_EXPLORATION), transition the workflow state to "In
+Progress" *before* posting the §3-announce comment, before
+hydrating images, before resolving branches, before any
+long-running step. The Linear sidebar must reflect "the robot is
+working on this right now" the instant any external observer
+opens the ticket — not 30 seconds later when the announce comment
+lands, not at §3b after image downloads, never. A ticket sitting
+in "Todo" while the bot has already committed to working on it is
+the bug this section exists to prevent.
+
+Skip this section only when route is **AWAITING_HUMAN** — those
+tickets are already in the state the human needs them in, and
+mutating them would be wrong.
+
+Resolve the target state explicitly — never pass `--state "In
+Progress"` blindly. The CLI fuzzy-matches and on a team without an
+exact "In Progress" can land in a downstream `completed` state.
+Scope the search to the `started` type group:
+
+```bash
+TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
+STATES_JSON=$(linear api '
+  query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
+' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
+
+# Pick the first In-Progress-flavored started state. NEVER cross into
+# `completed` (Done, Ready for Deployment, Shipped) or `unstarted`.
+PROGRESS_STATE=$(echo "$STATES_JSON" \
+  | jq -r '[.data.team.states.nodes[]
+            | select(.type=="started")
+            | select(.name | test("^(In Progress|Building|In Development|Started|Doing)$"; "i"))]
+            | .[0].name // empty')
+
+if [ -n "$PROGRESS_STATE" ]; then
+  linear issue update "$IDENT" --state "$PROGRESS_STATE" \
+    || echo "warning: failed to move $IDENT to $PROGRESS_STATE; continuing"
+else
+  echo "warning: team $TEAM_KEY has no In-Progress-style started state; leaving $IDENT in Todo"
+fi
+```
+
+The `select(.type=="started")` filter is load-bearing — it
+prevents the CLI from ever fuzzy-matching into a `completed` or
+`unstarted` state. On any failure, log a warning and continue —
+do not block on Linear state, but the §3-announce comment that
+follows must still describe the ticket as "in progress" (the
+state move is best-effort but always *attempted* first, so the
+comment narrative reflects intended state).
+
+Print the transition per ticket, e.g.
+`ENG-123 → state=In Progress (was Todo)`.
+
+### 3-announce. Post a "picked up" comment AFTER the state move
 
 For every ticket whose route is **BUILD** or **DESIGN_EXPLORATION**
 (i.e. anything except AWAITING_HUMAN), post a Linear comment
-immediately — before §3-design step 1, before §3a-pre, before any
-state mutation, before any long-running operation. Stakeholders
+immediately after §3-state — before §3a-pre, before image
+hydration, before any long-running operation. Stakeholders
 watching the ticket in Linear should see "the robot is on it" the
 moment we commit to doing real work, not 5 minutes later when the
-first phase comment lands.
+first phase comment lands. By the time this comment renders, the
+ticket sidebar already shows "In Progress" (per §3-state), so the
+announce comment reinforces what the state already says rather
+than racing it.
 
 ```markdown
 ### 🤖 picked up by /linear-team-build
@@ -238,7 +297,7 @@ best-effort — log a warning on failure and continue; never block
 dispatch on a label mutation.
 
 **Exception to "best-effort":** `design-explored` MUST stick. If
-adding it in §3-design step 5 fails, retry once via the `linear
+adding it in §3-design step 4 fails, retry once via the `linear
 api` fallback before giving up. Without it, the next run can't tell
 the ticket already went through the design loop and will route it
 back through `/linear-design` — wasted variants, duplicate noise on
@@ -257,11 +316,10 @@ so a human can pick. The next `/linear-team-build` run will see
 the `design-explored` label (or `design-selected` once the human
 picks) and skip straight to BUILD.
 
-1. **Move state → In Progress** (same logic as §3b — resolve the
-   team's actual `started`-type "In Progress"-flavored state; never
-   blind-pass `--state "In Progress"`).
-2. **Add label `Designing`.** Remove `needs-design` if present.
-3. **Post the "starting design" comment** via `--body-file`:
+State is already "In Progress" — §3-state moved it before §3-announce.
+
+1. **Add label `Designing`.** Remove `needs-design` if present.
+2. **Post the "starting design" comment** via `--body-file`:
    ```markdown
    ### 🎨 design exploration started
 
@@ -280,7 +338,7 @@ picks) and skip straight to BUILD.
      the next run will skip design and go straight to
      `/team-build` with the chosen direction in context.
    ```
-4. **Hydrate description images first**, then **invoke
+3. **Hydrate description images first**, then **invoke
    `/linear-design`**:
    - Run §3a-img inline (same recipe, same auth-token download
      loop, same 8-image cap) to populate `/tmp/ltb-img-$IDENT-N.<ext>`.
@@ -302,7 +360,7 @@ picks) and skip straight to BUILD.
      specifies a count), the `REF_ARGS`, and the ticket title +
      description as the brief. Without `--reference`, the variant
      teams design blind — every hydrated image must be forwarded.
-5. **After it returns** (success path only — failure handling at
+4. **After it returns** (success path only — failure handling at
    the end of §3-design):
    - **Add label `design-explored`** (per the label helper's
      exception clause: this label MUST stick — retry once on
@@ -345,7 +403,7 @@ picks) and skip straight to BUILD.
      marker that prevents the next run from re-routing through
      `/linear-design` — leave it attached.
      ```
-6. Record verdict `DESIGN_HANDOFF` in the results table. Note the
+5. Record verdict `DESIGN_HANDOFF` in the results table. Note the
    per-variant `team-design/...` branches in the row's "Next step"
    cell so they appear in §5's summary. Continue to the next
    ticket. Do NOT run §3a-pre…§3f for this ticket.
@@ -355,7 +413,7 @@ re-fetch the ticket and confirm the label set matches expectations
 (`design-explored` ✓, `Choose Design` ✓, `Designing` ✗, state =
 `Todo`). If any label or state is inconsistent (e.g., `Designing`
 still attached because removal failed earlier), retry the failing
-mutation once. This catches the partial-failure case where step 5
+mutation once. This catches the partial-failure case where step 4
 half-completed.
 
 **Failure path:** If `/linear-design` itself escalates or fails,
@@ -554,42 +612,15 @@ Slug for the worktree path: `$IDENT` lowercased (e.g. `eng-123`).
 `/team-build` adds its own timestamp suffix to the worktree directory
 even when `--working-branch` overrides the branch name.
 
-### 3b. Move the ticket to "In Progress" + post a "starting" comment
+### 3b. Add the `Building` label + post a "starting" comment
 
-Before launching, transition the ticket. **Resolve the target state
-explicitly — never pass `--state "In Progress"` blindly.** The CLI
-fuzzy-matches and on a team without an exact "In Progress" can land
-in something downstream like "In Review" or worse. Mirror the §3e
-pattern, scoped to the `started` type group:
+State is already "In Progress" — §3-state moved it before §3-announce.
+This section only handles the BUILD-specific label and the "team-build
+started" status comment; do NOT re-resolve or re-issue the state
+transition here (it's redundant and could fight a human who manually
+nudged the state in the meantime).
 
-```bash
-TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
-STATES_JSON=$(linear api '
-  query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
-' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
-
-# Pick the first In-Progress-flavored started state. NEVER cross into
-# `completed` (Done, Ready for Deployment, Shipped) or `unstarted`.
-PROGRESS_STATE=$(echo "$STATES_JSON" \
-  | jq -r '[.data.team.states.nodes[]
-            | select(.type=="started")
-            | select(.name | test("^(In Progress|Building|In Development|Started|Doing)$"; "i"))]
-            | .[0].name // empty')
-
-if [ -n "$PROGRESS_STATE" ]; then
-  linear issue update "$IDENT" --state "$PROGRESS_STATE" \
-    || echo "warning: failed to move $IDENT to $PROGRESS_STATE; continuing"
-else
-  echo "warning: team $TEAM_KEY has no In-Progress-style started state; leaving $IDENT in Todo"
-fi
-```
-
-The `select(.type=="started")` filter is load-bearing — it prevents
-the CLI from ever fuzzy-matching into a `completed` or `unstarted`
-state. On any failure, log a warning and continue — do not block the
-build on Linear state.
-
-Then **add the `Building` label** (best-effort, per the label
+**Add the `Building` label** (best-effort, per the label
 helper). If the route was DESIGN_EXPLORATION → BUILD on this
 re-run, the ticket may also carry `design-selected` and/or
 `Choose Design` — leave `design-selected` in place (it's a
@@ -977,30 +1008,48 @@ on disk waiting for a decision.
   dispatch `/team-build` against a ticket carrying the
   `Choose Design` label — that ticket is waiting on a human and
   must be left untouched.
+- **State change is the FIRST mutation, before any comment.** The
+  moment §3-route decides BUILD or DESIGN_EXPLORATION, run §3-state
+  to transition the ticket to "In Progress" *before* posting the
+  §3-announce comment, *before* hydrating images, *before* any
+  long-running step. A human watching the Linear sidebar must
+  never see "Todo" while the bot has already committed to working
+  on the ticket — the sidebar state is the strongest "the robot is
+  on it" signal Linear surfaces. Comments reinforce state; they
+  never lead it. If you find yourself posting any comment on a
+  ticket whose sidebar still says "Todo," that's the bug §3-state
+  exists to prevent. (AWAITING_HUMAN is the only carve-out — that
+  path mutates nothing.) Past failure: PIN-78 — bot posted the
+  "picked up" comment while the sidebar still showed "Todo"
+  because the state transition was scheduled for §3b, after image
+  hydration. State now precedes every comment.
 - **Phase labels mirror the workflow.** During a single
   `/linear-team-build` run, a ticket on the BUILD path moves
-  through: (start) → `Building` (§3b) → `Testing` (§3d.5) →
-  (cleared at PR open, state = `In Review`, §3e). On the
-  DESIGN_EXPLORATION path: (start) → `Designing` (§3-design step
-  2) → `Choose Design` + `design-explored` (§3-design step 5,
-  state back to `Todo`). Most label transitions are best-effort,
-  but **`design-explored` MUST stick** — it's the structural
-  signal §3-route uses to detect "design already done" and skip
-  re-exploration. Retry once on failure; surface loudly if it
-  can't be written. All other label add/remove failures: log a
-  warning and continue.
+  through: state → `In Progress` (§3-state) → `Building` (§3b) →
+  `Testing` (§3d.5) → (cleared at PR open, state = `In Review`,
+  §3e). On the DESIGN_EXPLORATION path: state → `In Progress`
+  (§3-state) → `Designing` (§3-design step 1) → `Choose Design` +
+  `design-explored` (§3-design step 4, state back to `Todo`).
+  Most label transitions are best-effort, but **`design-explored`
+  MUST stick** — it's the structural signal §3-route uses to
+  detect "design already done" and skip re-exploration. Retry
+  once on failure; surface loudly if it can't be written. All
+  other label add/remove failures: log a warning and continue.
 - **Narrate everything BEFORE you do it.** The principle: a human
   watching only the Linear ticket should always know what the
   robot is currently doing and what's coming next. Post a Linear
   comment *before* every substantive step — not after, not "when
   the phase finishes". The mandatory pre-comments are:
   - **§3-announce** — a "picked up by /linear-team-build" comment
-    is the FIRST thing that lands on any active ticket, naming
-    the route and reason. Posted before any state/label change.
+    is the FIRST comment that lands on any active ticket, naming
+    the route and reason. Posted *after* §3-state has moved the
+    workflow state to "In Progress" but *before* any other
+    label change or long-running operation, so the comment lands
+    against an already-correct sidebar.
   - **§3a-img** — a "fetching reference images" comment when the
     description contains auth-gated `uploads.linear.app` images,
     posted before the download loop.
-  - **§3-design step 3** — "design exploration started" comment
+  - **§3-design step 2** — "design exploration started" comment
     posted before invoking `/linear-design`.
   - **§3b** — "team-build started" comment posted before
     invoking `/team-build`.
@@ -1019,15 +1068,17 @@ on disk waiting for a decision.
   re-commenting on every run would spam the ticket).
   Silent gaps between these comments are bugs — when in doubt,
   add another pre-step comment rather than fewer.
-- **§3b runs BEFORE any dispatch skill, no matter which one.** The
-  ticket must show "In Progress" (or the team's equivalent
-  `started`-type state) the entire time the build is running, so
-  human observers in Linear can see something is happening. This
-  applies to `/team-build`, `/team-design`, or any other dispatch
-  skill — moving the ticket is a precondition of dispatch, not
-  something delegated to the dispatched skill. If §3b is silently
-  skipped because the skill jumped straight to dispatch, that's the
-  bug to fix — re-read §3b and run it.
+- **§3-state runs BEFORE any dispatch skill, no matter which one.**
+  The ticket must show "In Progress" (or the team's equivalent
+  `started`-type state) the entire time any work is being done on
+  it, so human observers in Linear can see something is happening.
+  This applies to `/team-build`, `/team-design`, or any other
+  dispatch skill — moving the ticket is a precondition of dispatch,
+  not something delegated to the dispatched skill. §3-state is the
+  single point that does this transition; §3b and §3-design no
+  longer re-issue it. If §3-state is silently skipped because the
+  skill jumped straight to §3-announce or §3a-pre, that's the bug
+  to fix — re-read §3-state and run it.
 - **One PR per ticket. ONE Skill-tool call to the dispatch skill
   per ticket** (typically `/team-build`; `/team-design` is allowed
   for design-flavored tickets where divergent variants are wanted).
