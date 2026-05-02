@@ -634,6 +634,19 @@ Linear's suggested working branch (when present) as `--working-branch`:
 build, security, QA, push, PR). It returns APPROVED-and-shipped,
 ESCALATED, or FAILED.
 
+> **APPROVED is NOT terminal for THIS skill.** When `/team-build`
+> returns APPROVED, the inner skill is done — but `/linear-team-build`
+> is not. **You MUST continue through §3d (capture outcome), §3d.5
+> (upload visual assets to Linear), §3e (post the APPROVED comment
+> with PR link + screenshots, transition state → In Review), and only
+> then move on to the next ticket.** Skipping §3d.5/§3e because
+> `/team-build` "succeeded" is the most common failure mode of this
+> skill — observed in real runs where the outer runner declared the
+> ticket finished and Linear was left with no APPROVED comment, no
+> screenshots, no state transition. APPROVED from the inner skill
+> means "build shipped, now publish the result back to Linear" — not
+> "we're done." Treat returning early after `/team-build` as a bug.
+
 After it returns, verify isolation:
 - `gh pr list` must now show **exactly one** new open PR vs.
   `PRS_BEFORE` whose head ref equals `$WORKING_BRANCH` (when supplied)
@@ -763,11 +776,24 @@ mutation($filename:String!,$contentType:String!,$size:Int!){
     '{filename:$f, contentType:$ct, size:$s}')")
 UPLOAD_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
 ASSET_URL=$(echo "$RESP"  | jq -r '.data.fileUpload.uploadFile.assetUrl')
-HDR_ARGS=(); while IFS= read -r row; do
+HDR_ARGS=(-H "Content-Type: $CT"); while IFS= read -r row; do
   HDR_ARGS+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
 done < <(echo "$RESP" | jq -c '.data.fileUpload.uploadFile.headers[]')
 curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$SHOT"
 ```
+
+> **`Content-Type: $CT` MUST be the first `-H` arg.** Linear's
+> `fileUpload` mutation signs the GCS PUT URL against the exact
+> `contentType` you passed in (`image/png`, `video/webm`,
+> `application/zip`). If you omit the header, curl auto-sets
+> `application/x-www-form-urlencoded` (because `--data-binary` is a
+> body upload), GCS sees the mismatch against the signed URL, and
+> rejects with **403 SignatureDoesNotMatch** — silently, since we
+> don't `--fail` here. The `headers[]` array Linear returns does
+> NOT include `Content-Type` — you must add it yourself. Observed
+> in production: an APPROVED ticket whose screenshot upload 403'd
+> and the missing image was only noticed when the human opened the
+> Linear ticket and saw a broken `![](…)` reference.
 Record each `$ASSET_URL`. If `success:false` or curl is non-2xx for a
 shot, drop just that shot and continue — never block §3e on an upload
 failure.
@@ -971,6 +997,26 @@ on disk waiting for a decision.
 - **Verify isolation between tickets.** Snapshot `gh pr list` before
   each call; confirm exactly one new PR with head ref
   `team-build/<ticket-slug>-*` after. Zero or more than one → STOP.
+- **APPROVED from `/team-build` is NOT terminal.** When the inner
+  skill returns APPROVED, the outer `/linear-team-build` MUST still
+  run §3d → §3d.5 (upload screenshots/walkthrough to Linear) → §3e
+  (post APPROVED comment with PR link + assets, transition state →
+  In Review). The single most common failure mode of this skill is
+  the outer runner treating an APPROVED return as "ticket done" and
+  jumping to the next ticket — leaving Linear with no APPROVED
+  comment, no screenshots, no state move. The PR exists on GitHub
+  but the ticket looks abandoned. If you find yourself about to
+  declare a ticket complete right after `/team-build` returns,
+  STOP — you skipped §3d.5 and §3e.
+- **Linear `fileUpload` PUT requires explicit `Content-Type: $CT`.**
+  The signed GCS URL is bound to the exact `contentType` argument
+  passed to the `fileUpload` mutation. The `headers[]` array Linear
+  returns does NOT include `Content-Type`. Without an explicit
+  `-H "Content-Type: $CT"`, curl auto-sets
+  `application/x-www-form-urlencoded` (because `--data-binary` is
+  a body upload), GCS rejects with **403 SignatureDoesNotMatch**,
+  and the upload silently fails. Always prepend
+  `-H "Content-Type: $CT"` as the FIRST header arg in §3d.5.
 - **No branch/PR reuse.** Branch name and PR number must be unique
   across the run.
 - **Clean-code bar is part of the contract.** The §3a clause is
