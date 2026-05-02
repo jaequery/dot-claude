@@ -193,6 +193,35 @@ UI heuristic for path 2 (any one fires):
 Print the route decision per ticket, e.g.
 `ENG-123 → route=DESIGN_EXPLORATION (label "needs-design")`.
 
+### 3-announce. Post a "picked up" comment BEFORE any work
+
+For every ticket whose route is **BUILD** or **DESIGN_EXPLORATION**
+(i.e. anything except AWAITING_HUMAN), post a Linear comment
+immediately — before §3-design step 1, before §3a-pre, before any
+state mutation, before any long-running operation. Stakeholders
+watching the ticket in Linear should see "the robot is on it" the
+moment we commit to doing real work, not 5 minutes later when the
+first phase comment lands.
+
+```markdown
+### 🤖 picked up by /linear-team-build
+
+- **Route:** `$ROUTE` (`DESIGN_EXPLORATION` → variants first, then human picks; `BUILD` → straight to /team-build)
+- **Why this route:** $ROUTE_REASON   <!-- e.g. "label `needs-design`", "keyword `modal` in title", "design-selected label present, going straight to build" -->
+- **Position in queue:** $POS / $TOTAL
+
+Next steps I'll narrate as I go — every state change, label change,
+and dispatch will land here as a comment so you don't have to watch
+the terminal. If something blocks, the blocker comment is the last
+one before silence.
+```
+
+This is the FIRST comment on every active ticket, even before the
+phase-specific "design exploration started" / "team-build started"
+comments. The phase comments still post — this one is additive,
+not a replacement. AWAITING_HUMAN never gets this comment (it's
+the only carve-out from the "narrate everything" rule).
+
 ### Label helper (used throughout §3)
 
 Linear labels are managed via the `linear` CLI when supported, else
@@ -391,6 +420,22 @@ URLs in `description` and as entries under `attachments.nodes[]`. These
 URLs are **auth-gated** — passing the URL through as text gives the
 Team Lead nothing useful. Fetch the bytes locally so Claude's `Read`
 tool can vision them.
+
+**Pre-step comment (only when images were detected — count > 0):**
+post a brief comment to Linear *before* the download loop runs, so the
+human knows what's happening and isn't left staring at a quiet ticket
+while curl chews through several MB:
+
+```markdown
+### 📥 fetching reference images
+
+Found $N image(s) in the description / attachments. Downloading them
+locally so the build team can actually see what was attached (Linear's
+`uploads.linear.app` URLs are auth-gated; the agent can't render them
+in-place). I'll start work as soon as this finishes.
+```
+
+If $N is 0, skip the comment (and skip §3a-img entirely).
 
 1. **Get the auth token.** `linear auth token` prints the OAuth token
    for the default workspace (or the one passed via `--workspace`):
@@ -879,15 +924,36 @@ on disk waiting for a decision.
   re-exploration. Retry once on failure; surface loudly if it
   can't be written. All other label add/remove failures: log a
   warning and continue.
-- **Comment at every transition** — except AWAITING_HUMAN.
-  Each phase boundary (design start, variants ready, build start,
-  QA capture start, PR opened, escalation/failure) posts a Linear
-  comment via `linear issue comment add … --body-file`. Silent
-  transitions break the "humans watch the ticket" contract.
-  **AWAITING_HUMAN is the only carve-out:** that path posts no
-  comment and makes no mutation (the ticket is already in the
-  state the human needs it in — re-commenting on every run would
-  spam the ticket).
+- **Narrate everything BEFORE you do it.** The principle: a human
+  watching only the Linear ticket should always know what the
+  robot is currently doing and what's coming next. Post a Linear
+  comment *before* every substantive step — not after, not "when
+  the phase finishes". The mandatory pre-comments are:
+  - **§3-announce** — a "picked up by /linear-team-build" comment
+    is the FIRST thing that lands on any active ticket, naming
+    the route and reason. Posted before any state/label change.
+  - **§3a-img** — a "fetching reference images" comment when the
+    description contains auth-gated `uploads.linear.app` images,
+    posted before the download loop.
+  - **§3-design step 3** — "design exploration started" comment
+    posted before invoking `/linear-design`.
+  - **§3b** — "team-build started" comment posted before
+    invoking `/team-build`.
+  - **§3d.5** — "QA capture in progress" comment posted before
+    the capture script runs.
+  - **§3e** — PR-open / escalation / failure comment posted as
+    the final phase signal, with the resolved state and any
+    walkthrough/screenshot embeds.
+
+  Posts are best-effort (a Linear API hiccup must not abort the
+  build) but expected. If a comment fails to post, log a warning
+  and continue — never retry inline (would block the build) and
+  never silently skip without logging. **AWAITING_HUMAN is the
+  only carve-out:** that path posts nothing and mutates nothing
+  (the ticket is already in the state the human needs it in —
+  re-commenting on every run would spam the ticket).
+  Silent gaps between these comments are bugs — when in doubt,
+  add another pre-step comment rather than fewer.
 - **§3b runs BEFORE any dispatch skill, no matter which one.** The
   ticket must show "In Progress" (or the team's equivalent
   `started`-type state) the entire time the build is running, so
