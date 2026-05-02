@@ -698,9 +698,9 @@ Push policy for this run (non-negotiable):
   the review surface, not a local gate.
 - **Evidence capture is NOT skipped.** The push-policy override only
   waives the typed-`yes` gate and the APPROVED-loop. You MUST still
-  execute the §5a capture script inline (Playwright/Cypress E2E with
-  `video: "on"` if configured, else the synthetic walkthrough) for
-  any UI-bearing diff. Leave the resulting
+  execute the §5a capture script inline (`playwright-cli` walkthrough
+  against the booted dev server) for any UI-bearing diff. Leave the
+  resulting
   `$WT_PATH/.team-build/evidence/` directory **on disk — do NOT
   commit it.** Linear-team-build §3d.5 reads it directly off the
   worktree and uploads to Linear; committing pollutes `Files changed`
@@ -916,24 +916,25 @@ REPORT_DIR="$EVID/playwright-report"      # default Playwright output dir
 REPORT_ZIP="$EVID/playwright-report.zip"
 ```
 
+The Playwright report is **optional** — it only exists when
+`/team-build` §5a's bonus test run fired (project has Playwright
+configured) and produced a report. The walkthrough video at
+`$EVID/00-walkthrough.{webm,mp4}` is the primary evidence; the report
+zip is supplementary.
+
 Resolution order:
 1. **Pre-built zip** — if `$REPORT_ZIP` already exists in the
    worktree, use it as-is.
 2. **Pre-built report dir** — if `$REPORT_DIR` exists but no zip,
    build one: `(cd "$EVID" && zip -rq playwright-report.zip playwright-report)`.
-3. **No artifacts on disk** — re-run the Playwright capture inline
-   in the worktree (mirrors `/team-build` §5a's capture-resolution
-   order: Playwright with override config → Cypress → repo
-   `.team-build/capture.sh` → `package.json` `team-build.capture` →
-   `pnpm install && pnpm db:migrate && pnpm db:seed && pnpm dev` +
-   synthetic walkthrough). Cap total time at 5 minutes. After the
-   run, zip whatever Playwright wrote into `$REPORT_DIR`.
-4. **Still nothing** — post the §3e comment with
-   `_Playwright report not captured: <one-line reason>_` AND open a
-   follow-up TODO comment naming what setup is missing (Playwright
-   config? `.team-build/capture.sh`?) so the next run captures
-   cleanly. This is the only path that ships UI work without a
-   report — and it must be loud.
+3. **No report on disk** — skip the report track entirely. This is
+   normal for non-JS/TS repos (PHP, Django, Rails, Go) and for any
+   repo without Playwright configured. The §3e comment renders the
+   walkthrough section without the `### Playwright report` block.
+   Do NOT re-run the capture from `/linear-team-build`; the
+   walkthrough should already be on disk from `/team-build` §5a, and
+   if it isn't, that's a §3d.5 walkthrough failure (handled by the
+   `WALKTHROUGH_VIDEO_ERR` paths below), not a report-zip failure.
 
 **Worktree-cleanup fallback.** Evidence is no longer committed to
 the branch (per `/team-build` §5.5), and §3a's prompt body sets
@@ -1429,13 +1430,13 @@ team state lists); nothing in it survives the summary.
   raised `--limit` past 10.
 - **§3d.5 is mandatory for any UI-bearing ticket.** Detection is by
   frontend-shaped diff, design label, or UI keywords. The
-  walkthrough+stills must be captured (preferring the project's
-  Playwright/Cypress E2E with `video: "on"` via override config,
-  falling back to repo `.team-build/capture.sh`, falling back to the
-  synthetic Playwright walkthrough) and uploaded via Linear's
-  `fileUpload` mutation. If `/team-build` skipped capture under the
-  autonomous push-policy, §3d.5 itself runs the capture script — do
-  not waive silently. The only acceptable miss is a hard structural
-  failure (no E2E config, dev server won't boot after 5min); in that
-  case post `_Walkthrough not captured: <reason>_` AND a follow-up
-  TODO comment naming what setup is needed. Never fabricate an image.
+  walkthrough+stills must be captured by `/team-build` §5a
+  (`playwright-cli` against the booted dev server, with repo-owned
+  `.team-build/capture.sh` taking priority when present) and
+  uploaded via Linear's `fileUpload` mutation. If `/team-build`
+  skipped capture under the autonomous push-policy, §3d.5 itself
+  runs the capture script — do not waive silently. The only
+  acceptable miss is a hard structural failure (no detectable boot
+  command, dev server won't answer within 30s); in that case post
+  `_Walkthrough not captured: <reason>_` AND a follow-up TODO
+  comment naming what setup is needed. Never fabricate an image.

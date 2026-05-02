@@ -588,265 +588,168 @@ capture as a result). The artifact at
 APPROVED precondition per §5 step 3. This replaces the post-APPROVED
 §3d.5 boot in `/linear-team-build` and the §5.5 still-only flow.
 
-**Capture-script resolution order** (first that exists wins):
+**Capture is `playwright-cli` against a live dev server.** Language-
+agnostic by design — works for PHP/Laravel, Django, Rails, Go, Bun,
+Node, anything that boots an HTTP server. The walkthrough proves
+"the feature visibly works"; existing test suites are an *optional
+bonus* run after the walkthrough and **do not gate APPROVED**. We do
+not try to integrate with the project's test runner, force `video:
+"on"` overrides, or harvest `.webm` files from `playwright-output/`.
 
-1. **Existing E2E tests** (preferred). If the repo has Playwright or
-   Cypress configured, run those tests with video recording on — they
-   already know how to boot the server, log in, seed data, and
-   navigate the real flows. This is the highest-fidelity capture
-   because it shows the actual feature being exercised, not a synthetic
-   scroll.
-
-   **Playwright** (detected by any `playwright.config.{ts,js,mjs}`
-   under the repo, or `@playwright/test` in any `package.json`).
-   Resolve the config path (often in a workspace package, not the
-   repo root):
-   ```bash
-   PW_CFG=$(find "$WT_PATH" -maxdepth 4 -name 'playwright.config.*' \
-     -not -path '*/node_modules/*' | head -1)
-   PW_DIR=$(dirname "$PW_CFG")   # cwd for the test run
-   ```
-
-   **Prefer the most-specific UI script.** Look in `package.json` (or
-   the workspace `package.json` colocated with the config) for these
-   scripts in order: `test:e2e:ui` → `test:e2e` → fall back to bare
-   `npx playwright test`. UI-scoped scripts run faster and avoid the
-   API-only suite.
-
-   **Force video on without mutating the tracked config.** Write a
-   temp override config that extends the project's, then pass it via
-   `--config`. There are four load-bearing details — every one of
-   them has shipped a broken capture run before.
-   ```bash
-   EVID="$WT_PATH/.team-build/evidence"
-   mkdir -p "$EVID"
-   # Strip the trailing ".ts"/".js"/".mjs" — TS module imports use the
-   # bare specifier, and Playwright's loader resolves it.
-   PW_CFG_BARE="${PW_CFG%.*}"
-   # The override MUST be a .ts file (NOT .mjs). Reason: when the
-   # project's config is `playwright.config.ts`, Node's ESM loader
-   # cannot import a .ts file directly, and a .mjs override that
-   # imports the .ts config fails with `SyntaxError: Cannot use import
-   # statement outside a module`. A .ts override is loaded by
-   # Playwright's own TS-aware module loader, which handles both.
-   cat > /tmp/tb-pw-override-$$.config.ts <<EOF
-   import base from "$PW_CFG_BARE";
-   const cfg: any = (base as any).default ?? base;
-   const FORCED_USE = {
-     video: "on" as const,
-     screenshot: "on" as const,
-     trace: "on" as const,
-     // Force headless — QA runs in background and must never spawn
-     // a visible browser window.
-     headless: true,
-     launchOptions: { ...(cfg.use?.launchOptions ?? {}), headless: true },
-   };
-   export default {
-     ...cfg,
-     // Top-level use is layered FIRST in Playwright config; projects[].use
-     // overrides it. So we must apply FORCED_USE to BOTH levels — otherwise
-     // \`video: "on"\` is silently overridden by any project that sets its
-     // own \`use\` block (very common — \`...devices["Desktop Chrome"]\`).
-     use: { ...(cfg.use ?? {}), ...FORCED_USE },
-     projects: (cfg.projects ?? []).map((p: any) => ({
-       ...p,
-       use: { ...(p.use ?? {}), ...FORCED_USE },
-     })),
-     // webServer.cwd defaults to the directory the config file lives in.
-     // Our override is in /tmp, so without an explicit cwd, \`pnpm exec\`
-     // commands fail with ERR_PNPM_RECURSIVE_EXEC_NO_PACKAGE because /tmp
-     // isn't a workspace. Pin cwd back to the project's package directory.
-     webServer: cfg.webServer ? {
-       ...cfg.webServer,
-       cwd: "$PW_DIR",
-     } : undefined,
-     reporter: [
-       ["list"],
-       ["html", { outputFolder: "$EVID/playwright-report", open: "never" }],
-     ],
-     outputDir: "$EVID/playwright-output",
-   };
-   EOF
-   ```
-
-   **Run, scoped to the diff.** Pass `--grep` based on changed files
-   (e.g. diff touches `components/Login.tsx` → `--grep login`); if no
-   spec matches, run the full UI suite. Use the project's package
-   manager from `corepack`:
-   ```bash
-   ( cd "$PW_DIR" && \
-     pnpm exec playwright test \
-       --config="/tmp/tb-pw-override-$$.config.ts" \
-       ${GREP:+--grep "$GREP"} \
-       || echo "playwright tests failed" )
-   ```
-
-   **⚠️ Manually-created browser contexts bypass `video: "on"`.**
-   Playwright's config-level `video` only applies to contexts the
-   test runner creates automatically. If the project has an E2E
-   fixture that does `await browser.newContext()` (no options) — a
-   common pattern for custom auth flows like better-auth's `authAs`
-   helper — the video config does NOT propagate, and no `.webm` is
-   produced even when the run is otherwise healthy. Symptoms: traces
-   and `test-finished-1.png` appear in `playwright-output/` but no
-   `.webm` files exist. Three options, in order of preference:
-
-   1. **Detect early and add explicit screenshots to the spec.** The
-      §5.5 visual evidence accepts step screenshots in lieu of a
-      walkthrough video (see §5.5 "CLI / backend / infra" exception
-      for cases where video can't be produced). Add 3-5
-      `await page.screenshot({ path: ... })` calls at key states.
-      Path: write to `$EVID` directly so they land alongside the
-      override's `outputDir`.
-   2. **Modify the fixture once.** Pass `recordVideo: { dir, size }`
-      into `browser.newContext()` so the project's auth-aware
-      contexts record. This is a one-line shared-test-infra change
-      and the right long-term fix; only do it if the user authorizes
-      touching shared test code.
-   3. **Synthetic fallback.** Drop to the synthetic walkthrough
-      below (option 4), which records its own context and bypasses
-      the project's fixture entirely. Skips real auth — useful for
-      pages that work logged-out, useless for protected routes.
-
-   Detection heuristic: after the run, if `playwright-output/` has
-   PNGs and `trace.zip` but zero `.webm` files, the project's
-   fixtures bypassed video — fall through to option 1.
-
-   **Harvest.** Every test now records a `.webm` and screenshots
-   (because `video: "on"` + `screenshot: "on"`). Extract just the
-   inline-renderable assets — Linear can't render the HTML report bundle:
-   ```bash
-   # Primary walkthrough: the most-recent (or longest) video.
-   WEBM=$(find "$EVID/playwright-output" -name '*.webm' -print0 \
-     | xargs -0 ls -t 2>/dev/null | head -1)
-   [ -n "$WEBM" ] && cp "$WEBM" "$EVID/00-walkthrough.webm"
-
-   # Up to 3 screenshots from the test run (Playwright names them by
-   # test/step). Numbered for stable ordering in the comment.
-   i=1
-   find "$EVID/playwright-output" -name '*.png' -print0 \
-     | xargs -0 ls -t 2>/dev/null | head -3 \
-     | while read -r SHOT; do
-         cp "$SHOT" "$EVID/0${i}-step.png"
-         i=$((i+1))
-       done
-   ```
-
-   Also zip the HTML report so it can be attached to the Linear
-   comment as a download (Linear can't render the bundle inline, but
-   reviewers without the repo checked out can grab it from the
-   ticket):
-   ```bash
-   ( cd "$EVID" && zip -qr playwright-report.zip playwright-report )
-   ```
-   The unzipped report stays in place and gets committed to the
-   branch by §5.5 — reviewers with the repo run
-   `npx playwright show-report .team-build/evidence/playwright-report`.
-
-   If `pnpm exec playwright` isn't available (no monorepo workspace
-   resolution), fall through to `npx --yes playwright@<version-from-lockfile>`.
-
-   **Cypress** (detected by `cypress.config.{ts,js}` or `cypress` in
-   `package.json`):
-   ```bash
-   npx cypress run \
-     --config video=true,videosFolder="$WT_PATH/.team-build/evidence/cypress" \
-     || echo "cypress tests failed"
-   find "$WT_PATH/.team-build/evidence/cypress" -name '*.mp4' \
-     -print0 | xargs -0 ls -t | head -1 \
-     | xargs -I{} cp {} "$WT_PATH/.team-build/evidence/00-walkthrough.mp4"
-   ```
-   Cypress emits `.mp4`; the upload path in §3d.5 / §5.5 should set
-   `$CT=video/mp4` accordingly. Linear renders both inline.
-
-   **Test selection.** If the diff touches specific files, prefer the
-   E2E spec whose name or grep pattern matches the changed component
-   (e.g. diff includes `components/Login.tsx` → run `--grep login` or
-   `cypress run --spec '**/login*'`). Falls back to the full UI suite
-   if no match.
-
-   **Canonical reference setup** (newpintask pattern, applies to most
-   pnpm/Next.js monorepos here):
-   - `apps/<pkg>/playwright.config.ts` with its own `webServer` block
-     that does `next build && next start` on a dedicated port.
-   - `globalSetup` + `.env.test` + a separate `_e2e` Postgres database.
-   - Scripts: `test:e2e` (all), `test:e2e:ui` (UI specs only),
-     `test:e2e:api` (API specs only). HTML reporter writes to
-     `e2e/.report/`.
-   - Default `use.video: "retain-on-failure"`. The override-config
-     above flips this to `"on"` for the QA run without modifying the
-     tracked file.
-   No extra dev-server boot or migrate/seed needed — the Playwright
-   `webServer` block handles it.
-
-2. `$WT_PATH/.team-build/capture.sh` — repo-owned hook. Receives env
-   vars `WALK_OUT` and `WALK_URL` and is responsible for the entire
-   boot → record → teardown cycle. Use this when the repo has no E2E
-   tests but needs custom auth/migrations/preview-URL handling.
-
-3. `package.json` field `team-build.capture` — same contract.
-
-4. **Default convention** — if `pnpm-lock.yaml` exists and
-   `package.json` defines `db:migrate`, `db:seed`, and `dev` scripts:
-   ```bash
-   pnpm install --frozen-lockfile
-   pnpm db:migrate
-   pnpm db:seed
-   pnpm dev &   # background; capture the printed URL
-   ```
-   Then run the synthetic walkthrough script below. Falls back to
-   legacy detection (npm/yarn/bun `dev`, `bin/dev`, etc.) if pnpm
-   conditions don't match.
-
-**Synthetic fallback walkthrough** (only when steps 1–4 don't cover
-it). Playwright MCP does not expose `recordVideo`, so shell out to
-`npx playwright`:
+**Pre-flight.** Make sure `playwright-cli` is on PATH:
 
 ```bash
-mkdir -p "$WT_PATH/.team-build/evidence"
-cat > /tmp/tb-walk-$$.mjs <<'EOF'
-import { chromium } from 'playwright';
-const url = process.env.WALK_URL;
-const out = process.env.WALK_OUT;
-const browser = await chromium.launch();
-const ctx = await browser.newContext({
-  viewport: { width: 1440, height: 900 },
-  recordVideo: { dir: out, size: { width: 1440, height: 900 } },
-});
-const page = await ctx.newPage();
-await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
-await page.waitForTimeout(800);
-for (let i = 0; i < 4; i++) {
-  await page.mouse.wheel(0, 600);
-  await page.waitForTimeout(700);
-}
-await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-await page.waitForTimeout(900);
-const focusable = await page.$('button, a, input, [role=button]');
-if (focusable) { await focusable.hover(); await page.waitForTimeout(500); }
-await ctx.close();
-await browser.close();
-EOF
-WALK_URL="$URL" WALK_OUT="$WT_PATH/.team-build/evidence" \
-  timeout 45s npx --yes -p playwright@latest node /tmp/tb-walk-$$.mjs \
-  || echo "video capture failed"
-WEBM=$(ls -1t "$WT_PATH/.team-build/evidence"/*.webm 2>/dev/null | head -1)
-[ -n "$WEBM" ] && mv "$WEBM" "$WT_PATH/.team-build/evidence/00-walkthrough.webm"
+command -v playwright-cli >/dev/null 2>&1 || npm i -g @playwright/cli
 ```
 
-PNG stills (`01-desktop.png`, `02-mobile.png`, `03-state.png`) are
-still captured via Playwright MCP as a fallback if the `.webm` is
-missing or <50KB.
+**Capture-script resolution order** (first that exists wins):
 
-**Failure semantics.**
-- Capture script exits non-zero, server doesn't answer, or video file
-  is missing/<50KB → QA agent reports "capture failed: <reason>" as a
-  finding. Team Lead decides whether this blocks APPROVED:
+1. `$WT_PATH/.team-build/capture.sh` — repo-owned hook (highest
+   priority). Receives env vars `WALK_OUT` (= `$EVID`) and `WALK_URL`
+   and is responsible for the entire boot → record → teardown cycle.
+   Use this when the repo has custom auth, migrations, or preview-URL
+   handling that boilerplate detection can't cover. The hook MUST
+   leave `$WALK_OUT/00-walkthrough.{webm,mp4}` on disk; everything
+   else is optional.
+
+2. `package.json` field `team-build.capture` — same contract as the
+   hook.
+
+3. **Default: `playwright-cli` walkthrough.** Boot the dev server per
+   the language-detection table below, wait for it to answer, then
+   drive it with `playwright-cli`.
+
+**Dev server detection** (first match wins). Boot in background,
+capture printed URL into `$URL` (or default to `http://localhost:$PORT`
+using the project's configured port), poll until it answers (cap at
+30s):
+
+| Detection                                | Boot command                                                          |
+|------------------------------------------|-----------------------------------------------------------------------|
+| `pnpm-lock.yaml` + `dev` script          | `pnpm install --frozen-lockfile && pnpm db:migrate 2>/dev/null; pnpm db:seed 2>/dev/null; pnpm dev` |
+| `bun.lockb` + `dev` script               | `bun install && bun run dev`                                          |
+| `package.json` only                      | `npm install && npm run dev`                                          |
+| `composer.json` + `artisan` (Laravel)    | `composer install && php artisan migrate --seed 2>/dev/null; php artisan serve --port=$PORT` |
+| `composer.json` (vanilla PHP)            | `composer install && php -S localhost:$PORT -t public`                |
+| `manage.py` (Django)                     | `pip install -r requirements.txt && python manage.py migrate 2>/dev/null; python manage.py runserver $PORT` |
+| `Gemfile` + `bin/dev`                    | `bundle install && bin/dev`                                           |
+| `Gemfile` (Rails)                        | `bundle install && bundle exec rails db:migrate 2>/dev/null; bundle exec rails server -p $PORT` |
+| `go.mod` + web entry (`cmd/server`/`main.go`) | `go run ./...` (or the `Makefile` `run` target)                  |
+| `Cargo.toml` with web crate              | `cargo run`                                                           |
+
+If the server never comes up within 30s, that's a capture failure
+(see Failure semantics below). Capture the dev-server PID at boot
+(`SERVER_PID=$!`) so the script can `kill "$SERVER_PID"` on exit.
+
+**Walkthrough script.** The Team Lead authors per-ticket steps from
+the AC. When the AC isn't browser-actionable (backend rate-limit
+work, CLI changes, infra), fall back to the generic
+scroll-and-screenshot tour at the bottom of the script — at minimum
+that proves the page renders.
+
+```bash
+SESS="tb-$$"
+EVID="$WT_PATH/.team-build/evidence"
+mkdir -p "$EVID"
+
+playwright-cli -s="$SESS" open "$URL"
+playwright-cli -s="$SESS" resize 1440 900
+playwright-cli -s="$SESS" video-start "$EVID/00-walkthrough.webm"
+
+# === Per-ticket steps authored from the AC ===
+# Mark each AC step with video-chapter; screenshot at each state
+# you'd want a reviewer to see. Examples:
+#
+#   playwright-cli -s="$SESS" video-chapter "Login"
+#   playwright-cli -s="$SESS" fill "input[name=email]" "test@example.com"
+#   playwright-cli -s="$SESS" fill "input[name=password]" "test1234"
+#   playwright-cli -s="$SESS" click "button[type=submit]"
+#   playwright-cli -s="$SESS" screenshot "$EVID/01-step.png"
+#
+# === Generic fallback (use only when AC is not browser-actionable) ===
+playwright-cli -s="$SESS" video-chapter "Top of page"
+playwright-cli -s="$SESS" screenshot "$EVID/01-step.png"
+playwright-cli -s="$SESS" eval "() => window.scrollTo({ top: 800, behavior: 'smooth' })"
+playwright-cli -s="$SESS" video-chapter "Mid-page"
+playwright-cli -s="$SESS" screenshot "$EVID/02-step.png"
+playwright-cli -s="$SESS" eval "() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })"
+playwright-cli -s="$SESS" video-chapter "Bottom"
+playwright-cli -s="$SESS" screenshot "$EVID/03-step.png"
+
+playwright-cli -s="$SESS" video-stop
+playwright-cli -s="$SESS" close
+
+# Tear down the dev server.
+kill "$SERVER_PID" 2>/dev/null || true
+```
+
+**Artifact contract** (preserved for `/linear-team-build` §3d.5):
+
+- `$EVID/00-walkthrough.webm` — primary walkthrough video. **Hard
+  APPROVED gate** per §5 step 3 (≥50KB).
+- `$EVID/0[1-3]-step.png` — up to 3 step stills (best-effort).
+- `$EVID/playwright-report.zip` — only present when the optional
+  test bonus below ran and produced a report.
+
+`playwright-cli` is session-based — every command must carry the
+same `-s=<session>` flag, otherwise each call spawns its own browser
+and the video records nothing. `close` at the end frees the session.
+
+### Optional bonus — run existing tests
+
+After the walkthrough completes, if the repo has a test runner
+configured, run it for **bonus signal only**. Pass/fail is surfaced
+in the §6 verdict but does **not gate APPROVED**. A failing project
+test that has nothing to do with the diff under review (flaky,
+unrelated suite, pre-existing breakage) is not a reason to block the
+ship. Skip this entire block on non-JS/TS repos — there's no PHPUnit /
+PyTest / RSpec hookup, by design.
+
+```bash
+# Playwright — produces a browseable HTML report; archive it for §3d.5.
+PW_CFG=$(find "$WT_PATH" -maxdepth 4 -name 'playwright.config.*' \
+  -not -path '*/node_modules/*' | head -1)
+if [ -n "$PW_CFG" ]; then
+  ( cd "$(dirname "$PW_CFG")" \
+    && pnpm exec playwright test \
+       --reporter=list,html \
+       --output="$EVID/playwright-output" 2>&1 \
+    | tee "$EVID/test-run.log" \
+    || echo "playwright tests had failures (non-blocking)" )
+  if [ -d "$EVID/playwright-report" ]; then
+    ( cd "$EVID" && zip -qr playwright-report.zip playwright-report )
+  fi
+fi
+
+# Cypress — pass/fail to log only; no archive.
+if [ -f "$WT_PATH/cypress.config.ts" ] || [ -f "$WT_PATH/cypress.config.js" ]; then
+  ( cd "$WT_PATH" \
+    && npx cypress run --reporter spec 2>&1 \
+    | tee -a "$EVID/test-run.log" \
+    || echo "cypress tests had failures (non-blocking)" )
+fi
+```
+
+When the bonus run fires, the Team Lead reads `$EVID/test-run.log`
+and notes pass/fail in the §6 verdict. If a failure clearly
+corresponds to the diff under review (not flaky/unrelated), the Team
+Lead may choose NEEDS ANOTHER ROUND on that basis — but the **video
+walkthrough remains the primary verification.**
+
+### Failure semantics
+
+- Walkthrough script exits non-zero, dev server doesn't answer
+  within 30s, or the video file is missing/<50KB →
+  `capture failed: <reason>` is recorded as a finding. Team Lead
+  decides whether this blocks APPROVED:
   - If the diff is genuinely UI-bearing, capture failure = NEEDS
     ANOTHER ROUND (or ESCALATED if the failure is structural, e.g.
-    missing `.team-build/capture.sh` for an auth-walled app).
-  - If the diff is UI-adjacent but the user can verify another way
-    (Storybook, test snapshot), Team Lead may waive and proceed.
+    no detectable boot command, or auth-walled app with no
+    `.team-build/capture.sh`).
+  - If the diff is UI-adjacent but verifiable another way (Storybook,
+    snapshot, terminal transcript), Team Lead may waive and proceed.
+- Optional test-bonus failures are surfaced but **do not gate
+  APPROVED** unless the failure clearly corresponds to the diff.
 - This is the only place capture failure is allowed to surface as a
   blocker. §5.5 and `/linear-team-build` §3d.5 reuse the artifact
   produced here; they do not re-boot the server.
