@@ -99,6 +99,34 @@ hatch) if a needed field is not exposed by a structured subcommand.
    needs it for PR creation.
 5. **`/team-build` reachable.** This skill invokes it via the Skill
    tool; if not listed as available, abort.
+6. **Capture run-level state once** (so per-ticket loops don't
+   re-derive identical values, and parallel jobs share a single
+   resolved value rather than racing). Set:
+   ```bash
+   LINEAR_TOKEN=$(linear auth token --workspace "$WORKSPACE" 2>/dev/null \
+     || linear auth token 2>/dev/null)
+   LTB_CACHE_DIR=/tmp/ltb-cache-$$
+   mkdir -p "$LTB_CACHE_DIR"
+   ```
+   - **`LINEAR_TOKEN`** is reused by §3a-img for `uploads.linear.app`
+     downloads — derive once here, never per-ticket. Empty token →
+     log a warning; image hydration in §3a-img will downgrade to
+     skip rather than block any build.
+   - **`$LTB_CACHE_DIR/issue-<IDENT>.json`** caches each ticket's
+     full issue JSON; written once per ticket in §2 (or after a
+     hydration re-fetch) and read by §3-state, §3a-pre, §3d, §3e.
+     Replaces ~3 redundant `linear issue view --json` calls per
+     ticket. If a write mutation in §3-design changes labels and
+     a follow-up consistency check needs the latest, re-fetch and
+     overwrite the cache file — caching never blocks a verification
+     re-read, only the read-only lookups.
+   - **`$LTB_CACHE_DIR/states-<TEAM_KEY>.json`** caches each team's
+     `WorkflowState` list; written on first lookup in §3-state and
+     reused by §3-design and §3e for the same team. State lists
+     are stable across the run; teams rarely add/remove states
+     mid-burndown. Across a run of 10 tickets on one team this
+     cuts the `linear api` state-list fetch from ~10× to 1×.
+   - Cache directory is removed at the end of §5.
 
 ## 2. Fetch the Todo queue
 
@@ -123,6 +151,14 @@ the printed table.
 
 If a returned issue is missing `description`, `attachments`, or
 `labels`, hydrate it with `linear issue view <ID> --json`.
+
+**Persist each issue's final JSON** (post-hydration if it ran) to
+`$LTB_CACHE_DIR/issue-<IDENT>.json`. This file is the canonical
+read source for §3-state, §3a-pre, §3d, and §3e — those sections
+must `jq` against this file rather than re-running
+`linear issue view "$IDENT" --json`. Cuts ~3 Linear reads per
+ticket and lets parallel mode (§4) share already-fetched data
+across jobs.
 
 Sort: `priority` ascending (1=urgent first; 0=no-priority last), then
 `updatedAt` ascending. Apply `--limit`. Print a numbered table:
@@ -217,10 +253,17 @@ exact "In Progress" can land in a downstream `completed` state.
 Scope the search to the `started` type group:
 
 ```bash
-TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
-STATES_JSON=$(linear api '
-  query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
-' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
+# Read team key from the cached issue JSON (§2). Cache the team's
+# WorkflowState list once per team, reuse for §3-design and §3e.
+TEAM_KEY=$(jq -r '.team.key' "$LTB_CACHE_DIR/issue-$IDENT.json")
+STATES_FILE="$LTB_CACHE_DIR/states-$TEAM_KEY.json"
+if [ ! -f "$STATES_FILE" ]; then
+  linear api '
+    query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
+  ' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')" \
+    > "$STATES_FILE"
+fi
+STATES_JSON=$(cat "$STATES_FILE")
 
 # Pick the first In-Progress-flavored started state. NEVER cross into
 # `completed` (Done, Ready for Deployment, Shipped) or `unstarted`.
@@ -429,10 +472,11 @@ Two distinct branches matter per ticket:
 
 - **`$WORKING_BRANCH`** — the new feature branch this build commits onto
   and pushes. **Default to Linear's suggested branch name**
-  (`issue.branchName`, e.g. `jaequery/pin-56-bug-...`) — fetch it
-  alongside the issue:
+  (`issue.branchName`, e.g. `jaequery/pin-56-bug-...`) — read it from
+  the cached issue JSON written in §2 (no extra `linear issue view`
+  round trip):
   ```bash
-  linear issue view "$IDENT" --json | jq -r '.branchName'
+  jq -r '.branchName // empty' "$LTB_CACHE_DIR/issue-$IDENT.json"
   ```
   If `branchName` is missing or empty, fall back to letting `/team-build`
   generate its default `team-build/<slug>-<ts>`. **Never** prepend
@@ -516,14 +560,11 @@ in-place). I'll start work as soon as this finishes.
 
 If $N is 0, skip the comment (and skip §3a-img entirely).
 
-1. **Get the auth token.** `linear auth token` prints the OAuth token
-   for the default workspace (or the one passed via `--workspace`):
-   ```bash
-   LINEAR_TOKEN=$(linear auth token --workspace "$WORKSPACE" 2>/dev/null \
-     || linear auth token 2>/dev/null)
-   ```
-   If empty, log a warning, skip image hydration, and continue —
-   never block the build on a missing token.
+1. **Token already cached.** §1 preflight derived `$LINEAR_TOKEN`
+   once for the whole run — reuse it. Do not re-call `linear auth
+   token` per ticket. If the run-level value is empty, log a warning,
+   skip image hydration for this ticket, and continue — never block
+   the build on a missing token.
 2. **Extract URLs.** Two sources, dedup the union:
    - From `$DESCRIPTION`: every `https://uploads.linear.app/...` URL
      inside `![…](…)` markdown image syntax.
@@ -534,20 +575,53 @@ If $N is 0, skip the comment (and skip §3a-img entirely).
      ```
    - From the issue JSON's `attachments.nodes[].url` entries whose URL
      host is `uploads.linear.app` OR whose `metadata.contentType`
-     starts with `image/`.
-3. **Download.** For each URL, `curl -fsSL -H "Authorization:
-   $LINEAR_TOKEN" -o /tmp/ltb-img-$IDENT-<n>.<ext>` where `<ext>` is
-   guessed from the `Content-Type` response header (default `.png`).
+     starts with `image/`. Read from the cached issue JSON
+     (`$LTB_CACHE_DIR/issue-$IDENT.json`), not a fresh
+     `linear issue view`.
+3. **Download in parallel** (cap 8 concurrent jobs, cap 8 total
+   images per ticket). Sequential `curl` left the network idle
+   between requests; for a ticket with 8 images this drops
+   hydration from ≈8× the slowest download to ≈1×. Linear's signed
+   CDN URLs have no documented per-IP limit and 8 keeps us polite.
+   ```bash
+   # Per-job manifest fragments avoid an interleaved-write race on
+   # the shared manifest file from N background curls.
+   rm -f /tmp/ltb-img-$IDENT-*.line 2>/dev/null
+   pids=()
+   n=0
+   while IFS= read -r URL; do
+     [ -z "$URL" ] && continue
+     n=$((n+1)); [ $n -gt 8 ] && break
+     OUT="/tmp/ltb-img-$IDENT-$n"
+     # Default extension to .png — the Read tool detects image
+     # format from bytes, so a missing/wrong extension on the
+     # filesystem is harmless. Skipping the per-URL HEAD probe
+     # keeps the loop tight.
+     (
+       if curl -fsSL -H "Authorization: $LINEAR_TOKEN" \
+            "$URL" -o "$OUT.png"; then
+         printf '%s\t%s\n' "$OUT.png" "$URL" > "$OUT.line"
+       fi
+     ) &
+     pids+=($!)
+   done <<< "$IMG_URLS"
+   for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null; done
+   ```
    NOTE: `uploads.linear.app` requires the raw token with **no `Bearer`
    prefix** — using `Bearer` returns 401. This differs from the GraphQL
    API endpoint, which does accept `Bearer`.
-   On 4xx/5xx, log the failure for that URL and continue with the
-   rest — partial coverage beats none. Cap at 8 images per ticket to
-   keep the prompt manageable.
-4. **Record a manifest.** Write `/tmp/ltb-img-$IDENT-manifest.txt`
-   with one line per successful download: `<local-path>  <original-url>`.
-   This lets the Team Lead correlate the downloaded file with the
-   reference in `$DESCRIPTION`.
+   On 4xx/5xx for any single URL, that download silently drops (no
+   `.line` fragment is written) and the rest continue — partial
+   coverage beats none.
+4. **Record a manifest.** Concatenate the per-job fragments into
+   `/tmp/ltb-img-$IDENT-manifest.txt` (one line per successful
+   download: `<local-path>  <original-url>`). This lets the Team
+   Lead correlate the downloaded file with the reference in
+   `$DESCRIPTION`.
+   ```bash
+   cat /tmp/ltb-img-$IDENT-*.line > /tmp/ltb-img-$IDENT-manifest.txt 2>/dev/null
+   rm -f /tmp/ltb-img-$IDENT-*.line
+   ```
 
 Pass the resulting `IMAGES_BLOCK` into the §3a prompt body — see the
 `Reference images` section in the template.
@@ -873,54 +947,26 @@ fi
 Failures here are non-fatal — the PR is already open on origin; a
 stranded worktree is a follow-up annoyance, not a blocker.
 
-**Upload the zip to Linear:**
-```bash
-CT="application/zip"
-SIZE=$(wc -c < "$REPORT_ZIP")
-NAME="playwright-report-$IDENT.zip"
-RESP=$(linear api '
-mutation($filename:String!,$contentType:String!,$size:Int!){
-  fileUpload(filename:$filename, contentType:$contentType, size:$size, makePublic:false){
-    success
-    uploadFile { uploadUrl assetUrl headers { key value } }
-  }
-}' --variables "$(jq -n --arg f "$NAME" --arg ct "$CT" --argjson s "$SIZE" \
-    '{filename:$f, contentType:$ct, size:$s}')")
-UPLOAD_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
-REPORT_ASSET_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.assetUrl')
-HDR_ARGS=(-H "Content-Type: $CT"); while IFS= read -r row; do
-  HDR_ARGS+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
-done < <(echo "$RESP" | jq -c '.data.fileUpload.uploadFile.headers[]')
-curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$REPORT_ZIP"
-```
-
-> **`Content-Type: $CT` MUST be the first `-H` arg.** Linear's
-> `fileUpload` mutation signs the GCS PUT URL against the exact
-> `contentType` you passed in (here, `application/zip`). If you omit
-> the header, curl auto-sets `application/x-www-form-urlencoded`
-> (because `--data-binary` is a body upload), GCS sees the mismatch
-> against the signed URL, and rejects with **403
-> SignatureDoesNotMatch** — silently, since we don't `--fail` here.
-> The `headers[]` array Linear returns does NOT include
-> `Content-Type` — you must add it yourself.
-
-Record `$REPORT_ASSET_URL`. If `success:false` or curl is non-2xx,
-log the failure (`REPORT_UPLOAD_ERR=<reason>`) and continue to the
-walkthrough upload — surface it in §3e as
-`_Playwright report upload failed: <reason>_`, never block §3e.
-
-**Now upload the inline walkthrough assets.** Same `fileUpload` recipe
-as the zip, just per-file with the right content type. Linear renders
-`video/webm`, `video/mp4`, and `image/png` inline when referenced as
-`![alt](assetUrl)` in a comment.
+**Define a reusable uploader, then run all uploads in parallel.**
+Each `fileUpload` mutation + GCS PUT is independent (no shared
+state, no ordering constraint), so background them all and `wait`.
+On a slow link, this drops upload time from ≈5× one upload (zip +
+video + 3 stills, sequential) to ≈1× the slowest. Each background
+job writes its `assetUrl` to a known file under `$RESULTS_DIR` so
+the parent can pick up results after `wait`.
 
 ```bash
-# Reusable single-file uploader. Echoes assetUrl on success, returns
-# non-zero on failure. Same Content-Type-as-first-header rule as the
-# zip upload above (signed PUT URL, GCS rejects mismatches with 403
-# SignatureDoesNotMatch).
+# Reusable single-file uploader. Writes assetUrl to $4 on success,
+# leaves $4 absent on failure. Same Content-Type-as-first-header
+# rule for every upload: Linear's fileUpload mutation signs the
+# GCS PUT URL against the exact contentType passed in, the
+# headers[] array Linear returns does NOT include Content-Type,
+# and without an explicit `-H "Content-Type: $CT"` curl auto-sets
+# application/x-www-form-urlencoded (--data-binary is a body
+# upload), GCS rejects with 403 SignatureDoesNotMatch — silently,
+# since we don't --fail here.
 upload_to_linear() {
-  local file="$1" ct="$2" name="$3"
+  local file="$1" ct="$2" name="$3" out_file="$4"
   local size resp upload_url asset_url
   size=$(wc -c < "$file")
   resp=$(linear api '
@@ -939,45 +985,103 @@ upload_to_linear() {
     hdr_args+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
   done < <(echo "$resp" | jq -c '.data.fileUpload.uploadFile.headers[]')
   curl -sSf -X PUT "$upload_url" "${hdr_args[@]}" --data-binary "@$file" >/dev/null || return 1
-  echo "$asset_url"
+  printf '%s\n' "$asset_url" > "$out_file"
 }
 
-# 1. Walkthrough video — prefer .webm, fall back to .mp4. Only one,
+RESULTS_DIR="$EVID/.upload-results"
+rm -rf "$RESULTS_DIR" 2>/dev/null
+mkdir -p "$RESULTS_DIR"
+PIDS=()
+
+# 1. Playwright report zip (only if it exists / was built).
+if [ -f "$REPORT_ZIP" ]; then
+  upload_to_linear "$REPORT_ZIP" "application/zip" \
+    "playwright-report-$IDENT.zip" "$RESULTS_DIR/report.url" &
+  PIDS+=($!)
+fi
+
+# 2. Walkthrough video — prefer .webm, fall back to .mp4. Only one,
 #    whichever exists first.
-WALKTHROUGH_VIDEO_ASSET_URL=""
-WALKTHROUGH_VIDEO_ERR=""
+WALK_FILE="" WALK_EXT=""
 for ext in webm mp4; do
   CAND="$EVID/00-walkthrough.$ext"
-  [ -f "$CAND" ] || continue
-  CT=$([ "$ext" = "webm" ] && echo "video/webm" || echo "video/mp4")
-  if URL=$(upload_to_linear "$CAND" "$CT" "walkthrough-$IDENT.$ext"); then
-    WALKTHROUGH_VIDEO_ASSET_URL="$URL"
-  else
-    WALKTHROUGH_VIDEO_ERR="upload failed for $CAND"
+  if [ -f "$CAND" ]; then
+    WALK_FILE="$CAND"; WALK_EXT="$ext"
+    break
   fi
-  break
 done
-[ -z "$WALKTHROUGH_VIDEO_ASSET_URL" ] && [ -z "$WALKTHROUGH_VIDEO_ERR" ] \
-  && WALKTHROUGH_VIDEO_ERR="no walkthrough video on disk"
+if [ -n "$WALK_FILE" ]; then
+  WALK_CT=$([ "$WALK_EXT" = "webm" ] && echo "video/webm" || echo "video/mp4")
+  upload_to_linear "$WALK_FILE" "$WALK_CT" \
+    "walkthrough-$IDENT.$WALK_EXT" "$RESULTS_DIR/walkthrough.url" &
+  PIDS+=($!)
+fi
 
-# 2. Up to 3 step stills — stable order by filename (01-, 02-, 03-).
-STILL_ASSET_URLS=()
-STILL_ERR=""
+# 3. Up to 3 step stills — stable order by filename (01-, 02-, 03-).
 for n in 1 2 3; do
   CAND="$EVID/0${n}-step.png"
   [ -f "$CAND" ] || continue
-  if URL=$(upload_to_linear "$CAND" "image/png" "step-${n}-$IDENT.png"); then
-    STILL_ASSET_URLS+=("$URL")
-  else
-    STILL_ERR="upload failed for $CAND"
-  fi
+  upload_to_linear "$CAND" "image/png" \
+    "step-${n}-$IDENT.png" "$RESULTS_DIR/still-${n}.url" &
+  PIDS+=($!)
+done
+
+# Wait for every upload to finish — successes leave a .url file,
+# failures don't. Order doesn't matter here.
+for pid in "${PIDS[@]}"; do wait "$pid" 2>/dev/null; done
+
+# Collect results. Empty/missing file = upload didn't succeed.
+REPORT_ASSET_URL=$(cat "$RESULTS_DIR/report.url" 2>/dev/null || true)
+WALKTHROUGH_VIDEO_ASSET_URL=$(cat "$RESULTS_DIR/walkthrough.url" 2>/dev/null || true)
+STILL_ASSET_URLS=()
+for n in 1 2 3; do
+  URL=$(cat "$RESULTS_DIR/still-${n}.url" 2>/dev/null || true)
+  [ -n "$URL" ] && STILL_ASSET_URLS+=("$URL")
+done
+
+# Failure messages for §3e (only set when we actually attempted
+# the upload — "no file on disk" is a different signal from
+# "upload failed").
+REPORT_UPLOAD_ERR=""
+[ -f "$REPORT_ZIP" ] && [ -z "$REPORT_ASSET_URL" ] \
+  && REPORT_UPLOAD_ERR="fileUpload mutation or GCS PUT failed"
+
+WALKTHROUGH_VIDEO_ERR=""
+if [ -n "$WALK_FILE" ] && [ -z "$WALKTHROUGH_VIDEO_ASSET_URL" ]; then
+  WALKTHROUGH_VIDEO_ERR="upload failed for $WALK_FILE"
+elif [ -z "$WALK_FILE" ]; then
+  WALKTHROUGH_VIDEO_ERR="no walkthrough video on disk"
+fi
+
+STILL_ERR=""
+# A still failure shows up only if at least one CAND existed and
+# its corresponding .url file is missing. Best-effort surfacing —
+# §3e renders whatever succeeded.
+for n in 1 2 3; do
+  CAND="$EVID/0${n}-step.png"
+  [ -f "$CAND" ] || continue
+  [ -s "$RESULTS_DIR/still-${n}.url" ] && continue
+  STILL_ERR="upload failed for $CAND"
 done
 ```
+
+> **`Content-Type: $CT` MUST be the first `-H` arg in every upload.**
+> Linear's `fileUpload` mutation signs the GCS PUT URL against the
+> exact `contentType` passed in (`application/zip`, `video/webm`,
+> `video/mp4`, or `image/png`). The `headers[]` array Linear returns
+> does NOT include `Content-Type` — you must add it yourself.
+> Without it, curl auto-sets `application/x-www-form-urlencoded`
+> (because `--data-binary` is a body upload), GCS rejects with
+> **403 SignatureDoesNotMatch**, and the upload silently fails.
+> `upload_to_linear` above already prepends it correctly — preserve
+> that order if you edit the helper.
 
 If neither the video nor any still uploaded successfully, §3e omits
 the `### Walkthrough` section but still shows the zip link (so
 reviewers can unzip locally). If at least one inline asset uploaded,
-§3e renders the section with whatever succeeded.
+§3e renders the section with whatever succeeded. The zip and
+walkthrough tracks remain independent: a failed zip never blocks
+the inline preview, and vice versa.
 
 Run the worktree teardown described in the cleanup block above
 before returning to §3e — the worktree is `/linear-team-build`'s to
@@ -1006,11 +1110,10 @@ multi-line markdown survives shell quoting.
   signal that a PR exists. Resolve explicitly:
 
   ```bash
-  # Pull the team's actual state list (states are team-scoped).
-  TEAM_KEY=$(linear issue view "$IDENT" --json | jq -r '.team.key')
-  STATES_JSON=$(linear api '
-    query($key:String!){ team(id:$key){ states{ nodes{ id name type } } } }
-  ' --variables "$(jq -nc --arg key "$TEAM_KEY" '{key:$key}')")
+  # Reuse the cached team key + state list (written in §3-state).
+  # State lists are stable across the run; no reason to refetch.
+  TEAM_KEY=$(jq -r '.team.key' "$LTB_CACHE_DIR/issue-$IDENT.json")
+  STATES_JSON=$(cat "$LTB_CACHE_DIR/states-$TEAM_KEY.json")
 
   # Pick the first match in priority order from the `started` group only —
   # never cross into `completed` (Done, Ready for Deployment, Shipped, Merged).
@@ -1164,6 +1267,14 @@ debugging, the latter so the human can compare variants before
 picking. Do not prompt to clean up APPROVED worktrees here; do
 surface the DESIGN_HANDOFF variant paths so the user knows what's
 on disk waiting for a decision.
+
+**Last step: remove the per-run cache directory** so it doesn't
+linger across runs:
+```bash
+[ -n "$LTB_CACHE_DIR" ] && [ -d "$LTB_CACHE_DIR" ] && rm -rf "$LTB_CACHE_DIR"
+```
+The cache is purely a per-invocation read accelerator (issue JSON,
+team state lists); nothing in it survives the summary.
 
 ## Hard rules
 
