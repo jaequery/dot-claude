@@ -694,8 +694,9 @@ comment so observers see the phase change:
 ```markdown
 ### 🧪 QA capture in progress
 
-Build round complete. Capturing walkthrough video + screenshots for
-the PR description and this ticket. Label moved `Building` → `Testing`.
+Build round complete. Running the Playwright test suite and packaging
+the report (screenshots, traces, video — all in one zip) for upload
+to this ticket. Label moved `Building` → `Testing`.
 ```
 
 **Capture happens during QA in `/team-build` §5a.** This section
@@ -721,74 +722,53 @@ opened. The only skip condition is "no UI surface in the diff."
 
 If none fire → skip §3d.5, proceed to §3e with no assets.
 
-**Locate artifacts:**
+**Locate or build the Playwright report zip.** The Playwright HTML
+report already contains every screenshot, trace, and video the run
+produced — uploading it as a single zip is dramatically simpler than
+extracting individual assets and embedding them inline. One file, one
+upload, one link in the comment.
+
 ```bash
 EVID="$WT/.team-build/evidence"
-VIDEO="$EVID/00-walkthrough.webm"   # or .mp4 if produced by Cypress
-[ -f "$EVID/00-walkthrough.mp4" ] && VIDEO="$EVID/00-walkthrough.mp4"
-# Step screenshots (from Playwright test run) or synthetic-fallback shots.
-PNGS=( "$EVID"/01-step.png "$EVID"/02-step.png "$EVID"/03-step.png \
-       "$EVID"/01-desktop.png "$EVID"/02-mobile.png "$EVID"/03-state.png )
-# Filter to existing files only.
-# When uploading, set $CT by extension: video/webm, video/mp4,
-# image/png, application/zip.
-REPORT_ZIP="$EVID/playwright-report.zip"   # full Playwright HTML report
-# The zip is uploaded to Linear as a download attachment (Linear can't
-# render multi-file HTML bundles inline). Reviewers download, unzip,
-# and run `npx playwright show-report <unzipped-dir>`.
+REPORT_DIR="$EVID/playwright-report"      # default Playwright output dir
+REPORT_ZIP="$EVID/playwright-report.zip"
 ```
 
-If `$WT` was cleaned by `/team-build` §6a, re-create a read-only
-worktree at `$WORKING_BRANCH` to access the committed evidence
-(`docs(team-build): add visual evidence for <slug>` commit). The
-artifacts are committed to the branch by §5.5, so they're guaranteed
-to exist on disk if §5a succeeded.
-
-**If artifacts are missing — run capture here, do not skip.**
-
-When `$WEBM` and all `$PNGS` are missing, do NOT silently waive.
-The autonomous push-policy block in §3a explicitly forbids skipping
-capture, so missing artifacts mean either /team-build skipped §5a
-(bug — surface it) or the worktree was already cleaned. Recover:
-
-1. **Re-materialize the worktree if needed.** If `$WT` no longer
-   exists (cleaned by /team-build §6a after PR open), create a
-   read-only worktree at `$WORKING_BRANCH`:
-   ```bash
-   SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.ltb-evidence-$IDENT_LOWER-$$"
-   git -C "$REPO_ROOT" worktree add --detach "$SHOT_WT" "origin/$WORKING_BRANCH"
-   WT="$SHOT_WT"  # rebind for the rest of §3d.5
-   ```
-   If §5.5 already committed evidence to the branch, it'll appear
-   under `$WT/.team-build/evidence/` and you can skip to upload.
-2. **Run the §5a capture script inline from this skill.** Read
-   `/team-build` §5a, follow its capture-resolution order
-   (Playwright with override config → Cypress → repo
+Resolution order:
+1. **Pre-built zip** — if `$REPORT_ZIP` already exists (§5.5 may have
+   zipped and committed it), use it as-is.
+2. **Pre-built report dir** — if `$REPORT_DIR` exists but no zip,
+   build one: `(cd "$EVID" && zip -rq playwright-report.zip playwright-report)`.
+3. **No artifacts on disk** — re-materialize the worktree if §6a
+   cleaned it (see fallback below), then re-run the Playwright capture
+   inline (mirrors `/team-build` §5a's capture-resolution order:
+   Playwright with override config → Cypress → repo
    `.team-build/capture.sh` → `package.json` `team-build.capture` →
    `pnpm install && pnpm db:migrate && pnpm db:seed && pnpm dev` +
-   synthetic walkthrough). Use the same `$EVID` path. Cap total
-   capture time at 5 minutes; on hard timeout, give up and proceed
-   to step 3.
-3. **If still nothing:** post the §3e comment with
-   `_Walkthrough not captured: <one-line reason>_` AND open a
-   follow-up TODO comment on the Linear ticket explaining what
-   needs to be set up (Playwright config? `.team-build/capture.sh`?)
-   so the next run captures cleanly. This is the only path that
-   ships UI work without a walkthrough — and it must be loud.
+   synthetic walkthrough). Cap total time at 5 minutes. After the
+   run, zip whatever Playwright wrote into `$REPORT_DIR`.
+4. **Still nothing** — post the §3e comment with
+   `_Playwright report not captured: <one-line reason>_` AND open a
+   follow-up TODO comment naming what setup is missing (Playwright
+   config? `.team-build/capture.sh`?) so the next run captures
+   cleanly. This is the only path that ships UI work without a
+   report — and it must be loud.
 
-Some assets missing (e.g. `.webm` exists but PNGs don't, or vice
-versa) → upload what exists. Do not re-run capture for partial
-results.
-
-Clean up the temp worktree at the end of §3d.5 if step 1 created
-one: `git worktree remove --force "$SHOT_WT"`.
-
-**Upload to Linear** (mirrors `/linear-design` §4a). For each asset
-(`.webm` first if present, else the PNGs in numeric order), set
-`$CT` to `video/webm` for the walkthrough or `image/png` for stills:
+**Worktree-cleanup fallback.** If `$WT` no longer exists (cleaned by
+`/team-build` §6a after PR open), create a read-only worktree at
+`$WORKING_BRANCH` to access the committed report:
 ```bash
-SIZE=$(wc -c < "$SHOT")
-NAME=$(basename "$SHOT")
+SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.ltb-evidence-$IDENT_LOWER-$$"
+git -C "$REPOROOT" worktree add --detach "$SHOT_WT" "origin/$WORKING_BRANCH"
+WT="$SHOT_WT"  # rebind for the rest of §3d.5
+```
+Clean up at the end of §3d.5: `git worktree remove --force "$SHOT_WT"`.
+
+**Upload the zip to Linear:**
+```bash
+CT="application/zip"
+SIZE=$(wc -c < "$REPORT_ZIP")
+NAME="playwright-report-$IDENT.zip"
 RESP=$(linear api '
 mutation($filename:String!,$contentType:String!,$size:Int!){
   fileUpload(filename:$filename, contentType:$contentType, size:$size, makePublic:false){
@@ -798,28 +778,26 @@ mutation($filename:String!,$contentType:String!,$size:Int!){
 }' --variables "$(jq -n --arg f "$NAME" --arg ct "$CT" --argjson s "$SIZE" \
     '{filename:$f, contentType:$ct, size:$s}')")
 UPLOAD_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
-ASSET_URL=$(echo "$RESP"  | jq -r '.data.fileUpload.uploadFile.assetUrl')
+REPORT_ASSET_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.assetUrl')
 HDR_ARGS=(-H "Content-Type: $CT"); while IFS= read -r row; do
   HDR_ARGS+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
 done < <(echo "$RESP" | jq -c '.data.fileUpload.uploadFile.headers[]')
-curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$SHOT"
+curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$REPORT_ZIP"
 ```
 
 > **`Content-Type: $CT` MUST be the first `-H` arg.** Linear's
 > `fileUpload` mutation signs the GCS PUT URL against the exact
-> `contentType` you passed in (`image/png`, `video/webm`,
-> `application/zip`). If you omit the header, curl auto-sets
-> `application/x-www-form-urlencoded` (because `--data-binary` is a
-> body upload), GCS sees the mismatch against the signed URL, and
-> rejects with **403 SignatureDoesNotMatch** — silently, since we
-> don't `--fail` here. The `headers[]` array Linear returns does
-> NOT include `Content-Type` — you must add it yourself. Observed
-> in production: an APPROVED ticket whose screenshot upload 403'd
-> and the missing image was only noticed when the human opened the
-> Linear ticket and saw a broken `![](…)` reference.
-Record each `$ASSET_URL`. If `success:false` or curl is non-2xx for a
-shot, drop just that shot and continue — never block §3e on an upload
-failure.
+> `contentType` you passed in (here, `application/zip`). If you omit
+> the header, curl auto-sets `application/x-www-form-urlencoded`
+> (because `--data-binary` is a body upload), GCS sees the mismatch
+> against the signed URL, and rejects with **403
+> SignatureDoesNotMatch** — silently, since we don't `--fail` here.
+> The `headers[]` array Linear returns does NOT include
+> `Content-Type` — you must add it yourself.
+
+Record `$REPORT_ASSET_URL`. If `success:false` or curl is non-2xx,
+log the failure and proceed to §3e — surface it there as
+`_Playwright report upload failed: <reason>_`, never block §3e.
 
 If you re-created a read-only worktree to access committed evidence,
 clean it up (`git worktree remove --force "$SHOT_WT"`) before
@@ -877,17 +855,21 @@ multi-line markdown survives shell quoting.
   of how the team named it. Robots only move tickets through
   `unstarted → started`; humans move them out of `started`.
   Comment body: the PR URL plus a one-line summary. **If §3d.5
-  produced uploaded assets, append a `### Walkthrough` section.** If a
-  `.webm` or `.mp4` walkthrough was uploaded, embed it first as
-  `![walkthrough]($ASSET_URL)` (Linear renders both inline as a player).
-  Then list any step / still PNGs as `![<label>]($ASSET_URL)` in
-  capture order. Video-only / stills-only / any combination is fine.
-  If `playwright-report.zip` was uploaded, append:
-  `[Full Playwright report (zip)]($ASSET_URL)` — reviewers download,
-  unzip, and run `npx playwright show-report <dir>` for every spec's
-  video, trace, and screenshot. If §3d.5 ran but captured nothing, append
-  a single line `_Walkthrough not captured: <reason>_`. If §3d.5 was
-  skipped (not a UX/design ticket), omit the section entirely.
+  uploaded a Playwright report zip, append a `### Playwright report`
+  section with a single link:**
+  ```markdown
+  ### Playwright report
+
+  [playwright-report-$IDENT.zip]($REPORT_ASSET_URL)
+
+  Download, unzip, then run `npx playwright show-report <unzipped-dir>`
+  to view every spec's screenshots, traces, and video.
+  ```
+  If §3d.5 ran but the upload failed, append
+  `_Playwright report upload failed: <reason>_`. If §3d.5 captured
+  nothing, append `_Playwright report not captured: <reason>_`. If
+  §3d.5 was skipped (not a UX/design ticket), omit the section
+  entirely.
 - **ESCALATED or FAILED:**
   Remove `Testing` and `Building` labels first (best-effort).
   ```bash
