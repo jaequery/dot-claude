@@ -740,9 +740,10 @@ comment so observers see the phase change:
 ```markdown
 ### 🧪 QA capture in progress
 
-Build round complete. Running the Playwright test suite and packaging
-the report (screenshots, traces, video — all in one zip) for upload
-to this ticket. Label moved `Building` → `Testing`.
+Build round complete. Running the Playwright test suite, then uploading
+the walkthrough video + up to 3 step stills (so this ticket renders
+them inline) plus the full Playwright HTML report as a zip download.
+Label moved `Building` → `Testing`.
 ```
 
 **Capture happens during QA in `/team-build` §5a.** This section
@@ -768,11 +769,23 @@ opened. The only skip condition is "no UI surface in the diff."
 
 If none fire → skip §3d.5, proceed to §3e with no assets.
 
-**Locate or build the Playwright report zip.** The Playwright HTML
-report already contains every screenshot, trace, and video the run
-produced — uploading it as a single zip is dramatically simpler than
-extracting individual assets and embedding them inline. One file, one
-upload, one link in the comment.
+**Two upload tracks, both run when artifacts exist:**
+
+1. **Inline walkthrough** — the `00-walkthrough.{webm,mp4}` video and
+   up to 3 `0[1-3]-step.png` stills that `/team-build` §5a harvested.
+   These get uploaded individually so the §3e comment can `![…](…)`
+   them and Linear renders them inline. This is the at-a-glance
+   preview reviewers see without leaving the ticket.
+2. **Full Playwright report zip** — every screenshot, trace, and
+   video the run produced, archived as one downloadable file. Linear
+   can't render the HTML report bundle inline, but reviewers without
+   the repo checked out can grab it from the ticket attachment slot.
+
+Both tracks are best-effort and independent: a failed zip upload does
+not block the inline walkthrough, and vice versa. §3e surfaces each
+status separately.
+
+**Locate or build the Playwright report zip first.**
 
 ```bash
 EVID="$WT/.team-build/evidence"
@@ -842,8 +855,79 @@ curl -sS -X PUT "$UPLOAD_URL" "${HDR_ARGS[@]}" --data-binary "@$REPORT_ZIP"
 > `Content-Type` — you must add it yourself.
 
 Record `$REPORT_ASSET_URL`. If `success:false` or curl is non-2xx,
-log the failure and proceed to §3e — surface it there as
+log the failure (`REPORT_UPLOAD_ERR=<reason>`) and continue to the
+walkthrough upload — surface it in §3e as
 `_Playwright report upload failed: <reason>_`, never block §3e.
+
+**Now upload the inline walkthrough assets.** Same `fileUpload` recipe
+as the zip, just per-file with the right content type. Linear renders
+`video/webm`, `video/mp4`, and `image/png` inline when referenced as
+`![alt](assetUrl)` in a comment.
+
+```bash
+# Reusable single-file uploader. Echoes assetUrl on success, returns
+# non-zero on failure. Same Content-Type-as-first-header rule as the
+# zip upload above (signed PUT URL, GCS rejects mismatches with 403
+# SignatureDoesNotMatch).
+upload_to_linear() {
+  local file="$1" ct="$2" name="$3"
+  local size resp upload_url asset_url
+  size=$(wc -c < "$file")
+  resp=$(linear api '
+    mutation($filename:String!,$contentType:String!,$size:Int!){
+      fileUpload(filename:$filename, contentType:$contentType, size:$size, makePublic:false){
+        success
+        uploadFile { uploadUrl assetUrl headers { key value } }
+      }
+    }' --variables "$(jq -n --arg f "$name" --arg ct "$ct" --argjson s "$size" \
+        '{filename:$f, contentType:$ct, size:$s}')")
+  upload_url=$(echo "$resp" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
+  asset_url=$(echo "$resp" | jq -r '.data.fileUpload.uploadFile.assetUrl')
+  [ -z "$upload_url" ] || [ "$upload_url" = "null" ] && return 1
+  local hdr_args=(-H "Content-Type: $ct")
+  while IFS= read -r row; do
+    hdr_args+=(-H "$(jq -r '.key' <<<"$row"): $(jq -r '.value' <<<"$row")")
+  done < <(echo "$resp" | jq -c '.data.fileUpload.uploadFile.headers[]')
+  curl -sSf -X PUT "$upload_url" "${hdr_args[@]}" --data-binary "@$file" >/dev/null || return 1
+  echo "$asset_url"
+}
+
+# 1. Walkthrough video — prefer .webm, fall back to .mp4. Only one,
+#    whichever exists first.
+WALKTHROUGH_VIDEO_ASSET_URL=""
+WALKTHROUGH_VIDEO_ERR=""
+for ext in webm mp4; do
+  CAND="$EVID/00-walkthrough.$ext"
+  [ -f "$CAND" ] || continue
+  CT=$([ "$ext" = "webm" ] && echo "video/webm" || echo "video/mp4")
+  if URL=$(upload_to_linear "$CAND" "$CT" "walkthrough-$IDENT.$ext"); then
+    WALKTHROUGH_VIDEO_ASSET_URL="$URL"
+  else
+    WALKTHROUGH_VIDEO_ERR="upload failed for $CAND"
+  fi
+  break
+done
+[ -z "$WALKTHROUGH_VIDEO_ASSET_URL" ] && [ -z "$WALKTHROUGH_VIDEO_ERR" ] \
+  && WALKTHROUGH_VIDEO_ERR="no walkthrough video on disk"
+
+# 2. Up to 3 step stills — stable order by filename (01-, 02-, 03-).
+STILL_ASSET_URLS=()
+STILL_ERR=""
+for n in 1 2 3; do
+  CAND="$EVID/0${n}-step.png"
+  [ -f "$CAND" ] || continue
+  if URL=$(upload_to_linear "$CAND" "image/png" "step-${n}-$IDENT.png"); then
+    STILL_ASSET_URLS+=("$URL")
+  else
+    STILL_ERR="upload failed for $CAND"
+  fi
+done
+```
+
+If neither the video nor any still uploaded successfully, §3e omits
+the `### Walkthrough` section but still shows the zip link (so
+reviewers can unzip locally). If at least one inline asset uploaded,
+§3e renders the section with whatever succeeded.
 
 If you re-created a read-only worktree to access committed evidence,
 clean it up (`git worktree remove --force "$SHOT_WT"`) before
@@ -900,9 +984,40 @@ multi-line markdown survives shell quoting.
   `Shipped`, `Done`, or any other `completed`-type state, regardless
   of how the team named it. Robots only move tickets through
   `unstarted → started`; humans move them out of `started`.
-  Comment body: the PR URL plus a one-line summary. **If §3d.5
-  uploaded a Playwright report zip, append a `### Playwright report`
-  section with a single link:**
+  Comment body: the PR URL plus a one-line summary. Then, **in this
+  exact order**, append the §3d.5 evidence sections so reviewers see
+  the inline preview *first* and the downloadable archive *second*:
+
+  **1. `### Walkthrough` (inline preview).** Render whatever §3d.5
+  successfully uploaded. Linear inlines `video/webm`, `video/mp4`,
+  and `image/png` when referenced as `![alt](assetUrl)`. Skip the
+  whole section only if the ticket is not a UX/design ticket OR
+  both the video and every still failed.
+  ```markdown
+  ### Walkthrough
+
+  ![walkthrough]($WALKTHROUGH_VIDEO_ASSET_URL)
+
+  ![step 1]($STILL_ASSET_URLS[0])
+  ![step 2]($STILL_ASSET_URLS[1])
+  ![step 3]($STILL_ASSET_URLS[2])
+  ```
+  Conditional rules:
+  - Video uploaded but no stills → omit the stills lines.
+  - Stills uploaded but no video → omit the `![walkthrough]` line.
+  - Fewer than 3 stills uploaded → emit only the lines for indexes
+    that exist (do NOT emit `![](null)`).
+  - Video attempt failed but capture existed → append
+    `_Walkthrough video upload failed: $WALKTHROUGH_VIDEO_ERR_` on
+    its own line in place of the `![walkthrough]` line.
+  - Capture genuinely missing (`$WALKTHROUGH_VIDEO_ERR` =
+    `no walkthrough video on disk`) **and** no stills uploaded →
+    `_Walkthrough not captured: <reason>_` and omit everything else.
+  Each still goes on its own line — Linear stacks them vertically
+  and that reads better than a single line of three thumbnails.
+
+  **2. `### Playwright report` (full archive download).** Render only
+  if the zip uploaded successfully:
   ```markdown
   ### Playwright report
 
@@ -911,11 +1026,12 @@ multi-line markdown survives shell quoting.
   Download, unzip, then run `npx playwright show-report <unzipped-dir>`
   to view every spec's screenshots, traces, and video.
   ```
-  If §3d.5 ran but the upload failed, append
-  `_Playwright report upload failed: <reason>_`. If §3d.5 captured
-  nothing, append `_Playwright report not captured: <reason>_`. If
-  §3d.5 was skipped (not a UX/design ticket), omit the section
-  entirely.
+  If the zip upload was attempted but failed, replace the whole
+  section body with `_Playwright report upload failed: $REPORT_UPLOAD_ERR_`
+  (keep the `### Playwright report` header so the absence is loud).
+  If §3d.5 captured nothing, use
+  `_Playwright report not captured: <reason>_`. If §3d.5 was skipped
+  (not a UX/design ticket), omit the section entirely.
 - **ESCALATED or FAILED:**
   Remove `Testing` and `Building` labels first (best-effort).
   ```bash
