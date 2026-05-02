@@ -866,29 +866,40 @@ Team Lead stops and hands back to the user with: a status report, what's
 blocking, and a recommendation (continue, change scope, or abandon).
 Don't burn tokens grinding past a structural problem — escalate.
 
-## 5.5 Visual evidence (commit + reference)
+## 5.5 Visual evidence (verify on disk — do NOT commit)
 
 For UI work, the walkthrough video and stills already exist under
 `$WT_PATH/.team-build/evidence/` from §5a (captured during QA, not
-after). This section is just packaging:
+after). **Evidence artifacts are NOT committed to the repo.** They
+are uploaded to Linear / posted as a GitHub PR comment by the
+orchestrator (e.g. `/linear-team-build` §3d.5), so committing them
+would only bloat the diff and pollute reviewers' `Files changed`
+view.
 
-- **UI work** — confirm `00-walkthrough.webm` (or the still set) is
-  present from §5a. Commit the evidence directory in its own commit:
-  `docs(team-build): add visual evidence for <slug>`. GitHub renders
-  images committed to the branch when the PR body references them via
-  relative paths. `.webm` videos render inline in PR descriptions on
-  GitHub.
+This section just verifies the artifacts are on disk and ready for
+upload — no `git add`, no `git commit`.
+
+- **UI work** — confirm `00-walkthrough.webm` (or `.mp4`, or the
+  `0[1-3]-step.png` still set) exists under
+  `$WT_PATH/.team-build/evidence/`. Record the filenames in the §6
+  final report so the orchestrator (or the user, in standalone mode)
+  knows what to upload.
 - **CLI / backend / infra** — capture a terminal transcript instead.
-  Run the relevant command(s) (test suite output, the new endpoint via
-  `curl`, the migration applying cleanly) and save the transcript as
-  `evidence-<step>.txt` under `.team-build/evidence/`. Skip image
-  capture; the PR body links the file.
+  Save it to `$WT_PATH/.team-build/evidence/evidence-<step>.txt`.
+  Same rule: do not commit; the orchestrator uploads or links it.
 - **Pure refactor with no observable surface** — skip this section
   entirely and note "no visual surface" in the §6 final report.
 
 If §5a flagged "capture failed" and the Team Lead chose to waive
 (non-critical UI surface), record "evidence not captured: <reason>"
 in the §6 report. Do not fabricate shots.
+
+> **Why not commit?** Evidence is QA artifact, not source. It belongs
+> on the ticket (Linear) or the PR conversation (GitHub PR comment),
+> not in `git log`. Committing it forces every future clone, blame,
+> bisect, and `git log -- <path>` to drag binary screenshots through
+> history forever, and shows up under `Files changed` where it has
+> no business being.
 
 ## 6. Ship
 
@@ -920,12 +931,26 @@ Then choose the ship path based on `$TARGET_BRANCH`:
 
 ### 6a. `$TARGET_BRANCH` was provided — push and open PR
 
-Before pushing, append a **`## Visual evidence`** section to the PR body
-listing each captured artifact with a one-line caption and a relative
-markdown image link (`![caption](.team-build/evidence/02-after-<slug>.png)`).
-GitHub renders images committed to the branch. If §5.5 was skipped
-("no visual surface" or "not captured: <reason>"), state that explicitly
-in the same section instead of omitting it.
+**Do NOT append a `## Visual evidence` section that links into
+`.team-build/evidence/...`.** Evidence is not committed (per §5.5),
+so relative-path image links would 404 on GitHub. Instead, append a
+short **`## Walkthrough`** section that names the local artifacts:
+
+```markdown
+## Walkthrough
+
+QA captured a walkthrough video and step screenshots; they are
+attached to the Linear ticket (and/or as a follow-up PR comment) —
+not committed to the branch.
+
+- Walkthrough: `00-walkthrough.webm` (~<n>s)
+- Steps: `01-step.png`, `02-step.png`, `03-step.png`
+```
+
+If §5.5 was skipped ("no visual surface" or "not captured: <reason>"),
+state that explicitly in the same section instead of omitting it. The
+orchestrator (`/linear-team-build` §3d.5, or a human running standalone)
+is responsible for uploading the actual files to Linear / a PR comment.
 
 1. Detect remote: `git -C "$REPO_ROOT" remote get-url origin`. If no
    `origin`, abort the push and tell the user how to add one — leave the
@@ -959,17 +984,21 @@ in the same section instead of omitting it.
     `gh` is missing, print the push URL from step 9 and stop.
 11. **Auto-cleanup after successful push + PR**: once the PR has been
    opened (the branch lives on origin and locally), remove the worktree
-   automatically — no question:
+   automatically — UNLESS an orchestrator has asked you to defer.
+
+   **Defer signal.** If the invoking prompt body contains the literal
+   string `DEFER_WORKTREE_CLEANUP=1` (set by `/linear-team-build` so
+   §3d.5 can read evidence files off disk), SKIP this step entirely.
+   Print: `worktree retained for orchestrator: $WT_PATH`. The
+   orchestrator owns cleanup after it's done with the artifacts.
+
+   Otherwise, clean up now:
    ```
-   # Sweep transient capture artifacts FIRST. Playwright's html report,
-   # output dir, and node-side traces are large untracked trees that
-   # routinely block `worktree remove` (it refuses on untracked content
-   # by default). They're fully reconstructible from another capture run,
-   # and the actionable artifacts (the numbered step screenshots committed
-   # to .team-build/evidence/*.png) are already on origin.
-   rm -rf "$WT_PATH/.team-build/evidence/playwright-output" \
-          "$WT_PATH/.team-build/evidence/playwright-report" \
-          "$WT_PATH/.team-build/evidence/cypress" 2>/dev/null
+   # Evidence is no longer committed (per §5.5), so nothing under
+   # $WT_PATH/.team-build/evidence/ lives on origin. The whole tree is
+   # ephemeral — sweep it before `worktree remove`, since the dir is
+   # untracked and would block removal.
+   rm -rf "$WT_PATH/.team-build/evidence" 2>/dev/null
    git -C "$REPO_ROOT" worktree remove "$WT_PATH"
    git -C "$REPO_ROOT" branch -d "$BRANCH"   # safe delete; skip if it fails (unmerged)
    ```
@@ -977,8 +1006,8 @@ in the same section instead of omitting it.
    after the sweep (means real uncommitted changes survived push), fall
    back to asking the user whether to force-remove or keep — do not
    silently leave artifacts without flagging. In autonomous-push mode
-   (e.g. invoked by `/linear-team-build`), force-remove is the right
-   call after the sweep — log the reason but don't block on it.
+   without the defer signal, force-remove is the right call after the
+   sweep — log the reason but don't block on it.
 12. **Drop the per-worktree DB** if §1.5 created one. Run from
     `$REPO_ROOT` against the same compose service:
     - **Postgres:**

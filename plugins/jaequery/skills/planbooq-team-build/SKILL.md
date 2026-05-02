@@ -786,13 +786,20 @@ Push policy for this run (non-negotiable):
   waives the typed-`yes` gate and the APPROVED-loop. You MUST still
   execute the §5a capture script inline (Playwright/Cypress E2E with
   `video: "on"` if configured, else the synthetic walkthrough) for
-  any UI-bearing diff and commit the resulting
-  `$WT_PATH/.team-build/evidence/` directory before pushing. If
-  capture fails (no E2E config AND synthetic boot fails), surface the
-  reason in the PR body and the §3e Planbooq comment as
+  any UI-bearing diff. Leave the resulting
+  `$WT_PATH/.team-build/evidence/` directory **on disk — do NOT
+  commit it.** Planbooq-team-build §3d.5 reads it directly off the
+  worktree and uploads to Planbooq; committing pollutes `Files
+  changed` with QA artifacts that have no business in VCS. If
+  capture fails (no E2E config AND synthetic boot fails), surface
+  the reason in the PR body and the §3e Planbooq comment as
   `_Walkthrough not captured: <reason>_` — never silently omit it.
-  Planbooq-team-build's §3d.5 step depends on these artifacts existing
-  on disk.
+  Planbooq-team-build's §3d.5 step depends on these artifacts
+  existing on disk in the worktree.
+- **DEFER_WORKTREE_CLEANUP=1.** This run is orchestrated by
+  `/planbooq-team-build`. Do NOT remove the worktree in §6a step 11 —
+  `/planbooq-team-build` §3d.5 needs the evidence files on disk and
+  will clean up the worktree itself after upload completes.
 - **"No UI surface mutation" is NOT a valid waiver reason.** The
   capture trigger is the §5 step-1 diff regex, not the agent's
   judgment about whether the change "feels visual." Conditional
@@ -979,14 +986,13 @@ REPORT_ZIP="$EVID/playwright-report.zip"
 ```
 
 Resolution order:
-1. **Pre-built zip** — if `$REPORT_ZIP` already exists (§5.5 may have
-   zipped and committed it), use it as-is.
+1. **Pre-built zip** — if `$REPORT_ZIP` already exists in the
+   worktree, use it as-is.
 2. **Pre-built report dir** — if `$REPORT_DIR` exists but no zip,
    build one: `(cd "$EVID" && zip -rq playwright-report.zip playwright-report)`.
-3. **No artifacts on disk** — re-materialize the worktree if §6a
-   cleaned it (see fallback below), then re-run the Playwright capture
-   inline (mirrors `/team-build` §5a's capture-resolution order:
-   Playwright with override config → Cypress → repo
+3. **No artifacts on disk** — re-run the Playwright capture inline
+   in the worktree (mirrors `/team-build` §5a's capture-resolution
+   order: Playwright with override config → Cypress → repo
    `.team-build/capture.sh` → `package.json` `team-build.capture` →
    `pnpm install && pnpm db:migrate && pnpm db:seed && pnpm dev` +
    synthetic walkthrough). Cap total time at 5 minutes. After the
@@ -998,15 +1004,27 @@ Resolution order:
    cleanly. This is the only path that ships UI work without a
    report — and it must be loud.
 
-**Worktree-cleanup fallback.** If `$WT` no longer exists (cleaned by
-`/team-build` §6a after PR open), create a read-only worktree at
-`$WORKING_BRANCH` to access the committed report:
+**Worktree-cleanup fallback.** Per `/team-build` §5.5, evidence
+under `.team-build/evidence/` is NOT committed; §3a's prompt body
+sets `DEFER_WORKTREE_CLEANUP=1` so `/team-build` §6a leaves `$WT`
+alive for this section. If `$WT` is unexpectedly missing (manual
+removal, older `/team-build` without defer support, etc.), the QA
+artifacts are unrecoverable — surface loudly:
+
 ```bash
-SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.pbq-evidence-$IDENTIFIER_LOWER-$$"
-git -C "$REPOROOT" worktree add --detach "$SHOT_WT" "origin/$WORKING_BRANCH"
-WT="$SHOT_WT"  # rebind for the rest of §3d.5
+if [ ! -d "$WT" ]; then
+  echo "evidence-fallback: worktree $WT missing — assets unavailable"
+  REPORT_UPLOAD_ERR="worktree cleaned before §3d.5 ran"
+  PUSH_FAILED=1
+fi
 ```
-Clean up at the end of §3d.5: `git worktree remove --force "$SHOT_WT"`.
+
+(Note: the deliverable zip below is committed to a *different* path
+— `.planbooq-team-build/shots/<id>/playwright-report.zip` — which IS
+intentional VCS content, since Planbooq has no fileUpload API and
+this is how reviewers reach the artifact via `raw.githubusercontent.com`.
+The non-committed tree is only the raw `.team-build/evidence/`
+working dir.)
 
 **Commit the zip to the PR branch and push.** Planbooq has no
 equivalent of Linear's `fileUpload` mutation, so the zip lives on
@@ -1044,9 +1062,20 @@ commit produced no changes to push, log the failure and proceed to
 <reason>_` or `_Playwright report not committed: <reason>_`, never
 block §3e.
 
-If you re-created a read-only worktree to access committed evidence,
-clean it up (`git worktree remove --force "$SHOT_WT"`) before
-returning to §3e.
+**Cleanup at the END of §3d.5** (after the report-zip commit + push
+above): tear down the worktree that `/team-build` §6a deferred,
+since `/planbooq-team-build` now owns it:
+
+```bash
+if [ -d "$WT" ]; then
+  rm -rf "$WT/.team-build/evidence" 2>/dev/null
+  git -C "$REPO_ROOT" worktree remove --force "$WT"
+  git -C "$REPO_ROOT" branch -d "$WORKING_BRANCH" 2>/dev/null || true
+fi
+```
+
+Failures here are non-fatal — the PR is already open on origin; a
+stranded worktree is a follow-up annoyance, not a blocker.
 
 ### 3e. Update the ticket
 
