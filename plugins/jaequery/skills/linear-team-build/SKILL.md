@@ -216,9 +216,12 @@ tool can vision them.
    - From the issue JSON's `attachments.nodes[].url` entries whose URL
      host is `uploads.linear.app` OR whose `metadata.contentType`
      starts with `image/`.
-3. **Download.** For each URL, `curl -fsSL -H "Authorization: Bearer
+3. **Download.** For each URL, `curl -fsSL -H "Authorization:
    $LINEAR_TOKEN" -o /tmp/ltb-img-$IDENT-<n>.<ext>` where `<ext>` is
    guessed from the `Content-Type` response header (default `.png`).
+   NOTE: `uploads.linear.app` requires the raw token with **no `Bearer`
+   prefix** — using `Bearer` returns 401. This differs from the GraphQL
+   API endpoint, which does accept `Bearer`.
    On 4xx/5xx, log the failure for that URL and continue with the
    rest — partial coverage beats none. Cap at 8 images per ticket to
    keep the prompt manageable.
@@ -363,67 +366,60 @@ supplied, else the `team-build/...` default), worktree path, verdict,
 rounds run. Also capture `$ISSUE_ID` (UUID) and `$TEAM_ID` (UUID) from
 `linear issue view "$IDENT" --json` — needed by §3d.5 for `fileUpload`.
 
-### 3d.5. Screenshot capture (UX/design tickets only)
+### 3d.5. Visual asset reuse (UX/design tickets only)
+
+**Capture happens during QA in `/team-build` §5a, not here.** This
+section just locates the artifacts that QA already produced and
+uploads them to Linear. No dev server boot, no second worktree.
 
 Only runs when verdict is **APPROVED** AND the ticket touches the UI.
 Otherwise skip this section entirely.
 
 **Detection (any one fires):**
-1. The PR diff contains frontend-shaped files. From the merged worktree
-   or via `gh`:
-   ```bash
-   gh pr diff "$PR_NUMBER" --name-only \
-     | grep -E '\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less|stylus)$|/(components|pages|app|views|routes|styles|public)/' \
-     | head -1
-   ```
-2. The Linear ticket has a label matching `^(ui|ux|design|frontend|web|mobile)$` (case-insensitive).
-3. The title or description contains any of: `UI`, `UX`, design,
-   layout, style, visual, page, screen, component, button, form,
-   modal, theme, responsive, dark mode (case-insensitive whole-word).
+1. The PR diff contains frontend-shaped files (`gh pr diff "$PR_NUMBER" --name-only`
+   matching `\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less|stylus)$` or
+   `/(components|pages|app|views|routes|styles|public)/`).
+2. The Linear ticket has a label matching `^(ui|ux|design|frontend|web|mobile)$`
+   (case-insensitive).
+3. Title/description contains any of: `UI`, `UX`, design, layout, style,
+   visual, page, screen, component, button, form, modal, theme,
+   responsive, dark mode (case-insensitive whole-word).
 
-If none fire → skip §3d.5 and proceed to §3e with no shots.
+If none fire → skip §3d.5, proceed to §3e with no assets.
 
-**Capture (best-effort; never block the loop):**
-
-Work inside `$WT` (the worktree `/team-build` produced for this
-ticket). If `/team-build` already cleaned the worktree on APPROVED
-(per its §6a), re-create one read-only checkout for screenshotting:
+**Locate artifacts:**
 ```bash
-SHOT_WT="$(dirname $REPO_ROOT)/$REPO_NAME.shot-$IDENT-$$"
-git worktree add --detach "$SHOT_WT" "$WORKING_BRANCH"
+EVID="$WT/.team-build/evidence"
+VIDEO="$EVID/00-walkthrough.webm"   # or .mp4 if produced by Cypress
+[ -f "$EVID/00-walkthrough.mp4" ] && VIDEO="$EVID/00-walkthrough.mp4"
+# Step screenshots (from Playwright test run) or synthetic-fallback shots.
+PNGS=( "$EVID"/01-step.png "$EVID"/02-step.png "$EVID"/03-step.png \
+       "$EVID"/01-desktop.png "$EVID"/02-mobile.png "$EVID"/03-state.png )
+# Filter to existing files only.
+# When uploading, set $CT by extension: video/webm, video/mp4,
+# image/png, application/zip.
+REPORT_ZIP="$EVID/playwright-report.zip"   # full Playwright HTML report
+# The zip is uploaded to Linear as a download attachment (Linear can't
+# render multi-file HTML bundles inline). Reviewers download, unzip,
+# and run `npx playwright show-report <unzipped-dir>`.
 ```
-(Mark this worktree for cleanup at the end of the ticket regardless
-of outcome.)
 
-Boot the project's dev server with the conventional command for the
-detected stack — try in order, first that exists wins, run in the
-background, capture the URL:
-- `package.json` script `dev` → `npm run dev` (or `pnpm dev` / `yarn dev` / `bun dev` matching the lockfile).
-- `package.json` script `start` → `npm start`.
-- `bin/dev`, `bin/rails server`, `php artisan serve`, `python manage.py runserver`, `go run .` — only if they're already wired in this repo.
+If `$WT` was cleaned by `/team-build` §6a, re-create a read-only
+worktree at `$WORKING_BRANCH` to access the committed evidence
+(`docs(team-build): add visual evidence for <slug>` commit). The
+artifacts are committed to the branch by §5.5, so they're guaranteed
+to exist on disk if §5a succeeded.
 
-Wait up to 30s for the server to respond on its printed URL (or the
-conventional default: `http://localhost:3000`, `:5173`, `:4321`,
-`:8000`, `:8080` — try in that order). If nothing answers, abort §3d.5,
-note `screenshots not captured: dev server did not boot` and proceed
-to §3e without images.
+**Failure modes:**
+- `$WEBM` and all `$PNGS` missing → §5a flagged "capture failed" and
+  Team Lead waived. Note `_Walkthrough not captured: <reason from §6 final report>_`
+  in the §3e comment and skip uploads.
+- Some assets missing → upload what exists. The QA agent already
+  decided this was sufficient when it produced APPROVED.
 
-Pick the URL to shoot:
-- If the ticket description contains a line `Screenshot: <path>` or
-  `Preview: <path>`, append that path to the base URL.
-- Else default to `/`.
-
-Capture three shots via Playwright MCP (`mcp__playwright__*`):
-1. Desktop, viewport `1440x900` — save as `01-desktop.png`.
-2. Mobile, viewport `390x844` — save as `02-mobile.png`.
-3. Same desktop URL after one interaction (scroll one viewport, or
-   focus the first interactive element) — `03-state.png`.
-
-Save under `$SHOT_WT/.linear-team-build/shots/$IDENT/`. Tear down the
-dev server (kill the background PID) before continuing. If any
-individual shot fails, keep the ones that succeeded; do not retry.
-
-**Upload to Linear** (mirrors `/linear-design` §4a). For each PNG:
+**Upload to Linear** (mirrors `/linear-design` §4a). For each asset
+(`.webm` first if present, else the PNGs in numeric order), set
+`$CT` to `video/webm` for the walkthrough or `image/png` for stills:
 ```bash
 SIZE=$(wc -c < "$SHOT")
 NAME=$(basename "$SHOT")
@@ -433,7 +429,7 @@ mutation($filename:String!,$contentType:String!,$size:Int!){
     success
     uploadFile { uploadUrl assetUrl headers { key value } }
   }
-}' --variables "$(jq -n --arg f "$NAME" --arg ct image/png --argjson s "$SIZE" \
+}' --variables "$(jq -n --arg f "$NAME" --arg ct "$CT" --argjson s "$SIZE" \
     '{filename:$f, contentType:$ct, size:$s}')")
 UPLOAD_URL=$(echo "$RESP" | jq -r '.data.fileUpload.uploadFile.uploadUrl')
 ASSET_URL=$(echo "$RESP"  | jq -r '.data.fileUpload.uploadFile.assetUrl')
@@ -446,7 +442,8 @@ Record each `$ASSET_URL`. If `success:false` or curl is non-2xx for a
 shot, drop just that shot and continue — never block §3e on an upload
 failure.
 
-Clean up `$SHOT_WT` (`git worktree remove --force "$SHOT_WT"`) before
+If you re-created a read-only worktree to access committed evidence,
+clean it up (`git worktree remove --force "$SHOT_WT"`) before
 returning to §3e.
 
 ### 3e. Update Linear
@@ -461,12 +458,17 @@ multi-line markdown survives shell quoting.
   linear issue update  "$IDENT" --state "In Review"   # falls back to leaving in "In Progress" if not present
   ```
   Comment body: the PR URL plus a one-line summary. **If §3d.5
-  produced any uploaded screenshots, append a `### Screenshots` section
-  embedding each as `![<label>]($ASSET_URL)` in capture order
-  (desktop → mobile → state).** If §3d.5 ran but captured nothing
-  (server didn't boot, etc.), append a single line:
-  `_Screenshots not captured: <reason>_`. If §3d.5 was skipped (not a
-  UX/design ticket), omit the section entirely.
+  produced uploaded assets, append a `### Walkthrough` section.** If a
+  `.webm` or `.mp4` walkthrough was uploaded, embed it first as
+  `![walkthrough]($ASSET_URL)` (Linear renders both inline as a player).
+  Then list any step / still PNGs as `![<label>]($ASSET_URL)` in
+  capture order. Video-only / stills-only / any combination is fine.
+  If `playwright-report.zip` was uploaded, append:
+  `[Full Playwright report (zip)]($ASSET_URL)` — reviewers download,
+  unzip, and run `npx playwright show-report <dir>` for every spec's
+  video, trace, and screenshot. If §3d.5 ran but captured nothing, append
+  a single line `_Walkthrough not captured: <reason>_`. If §3d.5 was
+  skipped (not a UX/design ticket), omit the section entirely.
 - **ESCALATED or FAILED:**
   ```bash
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
