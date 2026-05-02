@@ -141,6 +141,201 @@ tickets — no confirmation prompt.
 For each selected ticket, in order, run the sub-routine below. Print
 the running results table after each ticket finishes.
 
+### 3-route. Decide the path: design exploration vs. direct build
+
+Before any branch resolution or dispatch, route the ticket. There
+are three possible outcomes per ticket; pick the first that matches:
+
+1. **AWAITING_HUMAN** — ticket has the label `Choose Design` (any
+   case) **AND does NOT have `design-selected`**. A previous
+   `/linear-team-build` run already produced variants and the
+   human hasn't signaled a pick yet. Skip this ticket entirely:
+   do **not** transition state, do **not** post a comment, do
+   **not** dispatch. Record verdict `AWAITING_HUMAN` in the
+   results table and continue to the next ticket.
+
+   The `AND NOT design-selected` clause matters: a human who adds
+   `design-selected` *without* removing `Choose Design` (a common,
+   forgivable slip) would otherwise be stuck here forever. The
+   `design-selected` label is the stronger signal — if it's
+   present, the human has picked, period.
+
+2. **DESIGN_EXPLORATION** — UI heuristic fires (label or keyword
+   rules below) **AND** the ticket has no signal that design has
+   already been chosen. Signals that design is done (any one ⇒
+   skip this path and fall through to BUILD):
+   - label `design-selected` is present, OR
+   - label `design-explored` is present (we write this in §3-design
+     step 5 once variants have been posted; it survives across
+     runs as a structural "this ticket already went through the
+     design loop" marker).
+
+   When this path matches, run §3-design and continue the queue —
+   do NOT run the §3a-pre…§3f build path for this ticket.
+
+   **Why a label, not a comment marker?** Labels are returned by
+   the same `linear issue view --json` call that fetches the
+   ticket, so detection is one read. A comment-body marker would
+   require a second `comments{nodes{body}}` query and grep — more
+   moving parts, more failure modes.
+
+3. **BUILD** — everything else. Proceed to §3a-pre and run the
+   normal `/team-build` path through §3f.
+
+UI heuristic for path 2 (any one fires):
+- Label match: `^(ui|ux|design|frontend|web|mobile|needs-design)$`
+  case-insensitive.
+- Keyword match in title or description (case-insensitive,
+  whole-word): `UI`, `UX`, design, layout, style, visual, page,
+  screen, component, button, form, modal, theme, responsive,
+  `dark mode`.
+
+Print the route decision per ticket, e.g.
+`ENG-123 → route=DESIGN_EXPLORATION (label "needs-design")`.
+
+### Label helper (used throughout §3)
+
+Linear labels are managed via the `linear` CLI when supported, else
+via `linear api`. The CLI's `issue update` accepts `--label <name>`
+to add and `--remove-label <name>` to drop, but flag names vary by
+version — if `linear issue update --help` doesn't list them, fall
+back to `linear api` with `issueUpdate { labelIds }` after fetching
+the team's label list (`team(id:$key){ labels{ nodes{ id name } } }`),
+creating the label via `issueLabelCreate` if it doesn't exist on
+the team yet, and writing the merged `labelIds` set. Labels created
+by this skill: `Designing`, `Choose Design`, `design-explored`,
+`design-selected`, `Building`, `Testing`. Label add/remove is
+best-effort — log a warning on failure and continue; never block
+dispatch on a label mutation.
+
+**Exception to "best-effort":** `design-explored` MUST stick. If
+adding it in §3-design step 5 fails, retry once via the `linear
+api` fallback before giving up. Without it, the next run can't tell
+the ticket already went through the design loop and will route it
+back through `/linear-design` — wasted variants, duplicate noise on
+the ticket. If both attempts fail, surface a loud warning in the
+final summary and append a `_design-explored label could not be
+written — manual cleanup required_` line to the "variants ready"
+comment so the human knows.
+
+### 3-design. Design exploration path (route = DESIGN_EXPLORATION)
+
+The ticket needs divergent variants before anyone writes code. We
+hand it to `/linear-design` (which wraps `/team-design`), let it
+post variant screenshots back to the ticket, then return the
+ticket to **Todo** with `Choose Design` + `design-explored` labels
+so a human can pick. The next `/linear-team-build` run will see
+the `design-explored` label (or `design-selected` once the human
+picks) and skip straight to BUILD.
+
+1. **Move state → In Progress** (same logic as §3b — resolve the
+   team's actual `started`-type "In Progress"-flavored state; never
+   blind-pass `--state "In Progress"`).
+2. **Add label `Designing`.** Remove `needs-design` if present.
+3. **Post the "starting design" comment** via `--body-file`:
+   ```markdown
+   ### 🎨 design exploration started
+
+   Routing through `/linear-design` because this ticket looks
+   design-flavored (UI label or UX keywords in title/description).
+
+   - `/linear-design --existing $IDENT` is producing N divergent
+     variants in parallel via `/team-design`.
+   - Each variant will land as its own comment on this ticket
+     with screenshots and a per-variant git branch
+     (`team-design/<slug>-<variant>`).
+   - When done, I'll move this ticket back to **Todo** with the
+     **`Choose Design`** label. Pick a variant by leaving a
+     comment, then add the **`design-selected`** label (or just
+     remove `Choose Design`) and re-run `/linear-team-build` —
+     the next run will skip design and go straight to
+     `/team-build` with the chosen direction in context.
+   ```
+4. **Hydrate description images first**, then **invoke
+   `/linear-design`**:
+   - Run §3a-img inline (same recipe, same auth-token download
+     loop, same 8-image cap) to populate `/tmp/ltb-img-$IDENT-N.<ext>`.
+     §3a-img is documented later in the BUILD path but the recipe
+     is path-agnostic — it only needs `$IDENT`, `$DESCRIPTION`,
+     and the issue JSON, all of which are available here.
+   - Build a `--reference` flag list from the manifest:
+     ```bash
+     REF_ARGS=()
+     while IFS=$'  ' read -r local_path orig_url; do
+       REF_ARGS+=(--reference "$local_path")
+     done < /tmp/ltb-img-$IDENT-manifest.txt 2>/dev/null
+     ```
+     If hydration produced no files, `REF_ARGS` is empty — that's
+     fine, `/linear-design` handles zero references.
+   - Make exactly one Skill-tool call to `/linear-design`. Pass
+     `--existing $IDENT` so it attaches to this ticket (don't
+     create a duplicate), `--variants 4` (unless the description
+     specifies a count), the `REF_ARGS`, and the ticket title +
+     description as the brief. Without `--reference`, the variant
+     teams design blind — every hydrated image must be forwarded.
+5. **After it returns** (success path only — failure handling at
+   the end of §3-design):
+   - **Add label `design-explored`** (per the label helper's
+     exception clause: this label MUST stick — retry once on
+     failure, surface loudly if it can't be written).
+   - Remove label `Designing`. Add label `Choose Design`.
+   - Move state → **Todo**. Resolve explicitly:
+     ```bash
+     TODO_STATE=$(echo "$STATES_JSON" \
+       | jq -r '[.data.team.states.nodes[]
+                 | select(.type=="unstarted")
+                 | select(.name | test("^(Todo|To Do)$"; "i"))]
+                 | .[0].name // empty')
+     ```
+     If empty, **abort the state transition with a loud warning
+     and post a follow-up comment**: `"⚠️ Could not return ticket
+     to Todo — team has no Todo-flavored unstarted state. Manual
+     move required."` Do NOT fuzzy-match into Backlog,
+     Triage, or any other unstarted state — §2's queue filter
+     keys on `state.name == "Todo"`, so a misnamed fallback would
+     silently strand the ticket out of the next run's queue.
+   - Post the "variants ready" comment via `--body-file`:
+     ```markdown
+     ### 🎨 variants ready — please pick one
+
+     `/linear-design` finished. Each variant is a comment above
+     this one with screenshots and a per-variant git branch
+     (`team-design/<slug>-<variant>`) you can check out locally
+     to compare.
+
+     **To proceed:**
+     1. Decide which variant to ship.
+     2. Either add the **`design-selected`** label, or remove
+        the **`Choose Design`** label (either signals "pick
+        recorded" — both work).
+     3. Re-run `/linear-team-build` — this ticket will route
+        straight to `/team-build` and the build team will see
+        the chosen direction in the comment history above.
+
+     The `design-explored` label on this ticket is the structural
+     marker that prevents the next run from re-routing through
+     `/linear-design` — leave it attached.
+     ```
+6. Record verdict `DESIGN_HANDOFF` in the results table. Note the
+   per-variant `team-design/...` branches in the row's "Next step"
+   cell so they appear in §5's summary. Continue to the next
+   ticket. Do NOT run §3a-pre…§3f for this ticket.
+
+**Final consistency sweep at the end of §3-design** (success path):
+re-fetch the ticket and confirm the label set matches expectations
+(`design-explored` ✓, `Choose Design` ✓, `Designing` ✗, state =
+`Todo`). If any label or state is inconsistent (e.g., `Designing`
+still attached because removal failed earlier), retry the failing
+mutation once. This catches the partial-failure case where step 5
+half-completed.
+
+**Failure path:** If `/linear-design` itself escalates or fails,
+treat it like a BUILD failure: comment the blocker, move state
+back to **Todo** (using the same explicit Todo-only resolution as
+above), remove `Designing`, do NOT add `Choose Design` or
+`design-explored` (nothing to choose, didn't actually explore),
+record verdict `DESIGN_FAILED`.
+
 ### 3a-pre. Resolve the working branch and target branch for this ticket
 
 Two distinct branches matter per ticket:
@@ -334,19 +529,27 @@ the CLI from ever fuzzy-matching into a `completed` or `unstarted`
 state. On any failure, log a warning and continue — do not block the
 build on Linear state.
 
+Then **add the `Building` label** (best-effort, per the label
+helper). If the route was DESIGN_EXPLORATION → BUILD on this
+re-run, the ticket may also carry `design-selected` and/or
+`Choose Design` — leave `design-selected` in place (it's a
+historical record) and remove `Choose Design` if it's still
+present (the human signaled by re-running this skill).
+
 Then post a status comment so non-terminal stakeholders can follow
 along. Write to a temp file and use `--body-file`:
 
 ```markdown
 ### 🛠️ team-build started
 
+- **Label:** `Building`
 - **Working branch:** `$WORKING_BRANCH`
 - **Target (PR base):** `$RESOLVED`
 - **Worktree slug:** `$IDENT_LOWER`
 - **Mode:** `/team-build` (plan → parallel specialist build → security audit → QA + code review, looping until clean)
 - **Clean-code bar:** reuse existing patterns, minimal diff, no dead code/TODOs/console.logs.
 
-I'll comment again when the build finishes (APPROVED → PR link + screenshots if UX, ESCALATED/FAILED → blocker summary).
+Next stops: `Testing` label during QA capture, then PR open + state → `In Review`.
 ```
 
 ```bash
@@ -402,6 +605,17 @@ rounds run. Also capture `$ISSUE_ID` (UUID) and `$TEAM_ID` (UUID) from
 `linear issue view "$IDENT" --json` — needed by §3d.5 for `fileUpload`.
 
 ### 3d.5. Visual asset reuse (UX/design tickets only)
+
+**Before locating/capturing, swap labels: remove `Building`, add
+`Testing`** (best-effort, per the label helper). Post a one-line
+comment so observers see the phase change:
+
+```markdown
+### 🧪 QA capture in progress
+
+Build round complete. Capturing walkthrough video + screenshots for
+the PR description and this ticket. Label moved `Building` → `Testing`.
+```
 
 **Capture happens during QA in `/team-build` §5a.** This section
 locates the artifacts that QA produced and uploads them to Linear.
@@ -524,6 +738,10 @@ write the comment body to a temp file and pass `--body-file` so
 multi-line markdown survives shell quoting.
 
 - **APPROVED + PR opened:**
+  **First, clean up phase labels** (best-effort): remove `Testing`
+  and remove `Building` if it's still attached. Do not add a new
+  phase label here — the workflow state (`In Review`, set below)
+  is the signal for this stage.
   ```bash
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
   ```
@@ -577,6 +795,7 @@ multi-line markdown survives shell quoting.
   a single line `_Walkthrough not captured: <reason>_`. If §3d.5 was
   skipped (not a UX/design ticket), omit the section entirely.
 - **ESCALATED or FAILED:**
+  Remove `Testing` and `Building` labels first (best-effort).
   ```bash
   linear issue comment add "$IDENT" --body-file /tmp/dda-comment-$IDENT.md
   linear issue update  "$IDENT" --state "Todo"
@@ -611,25 +830,64 @@ effective concurrency exceeds 5, warn the user about shared
 ## /linear-team-build — summary
 Processed: N tickets
 
-| Ticket   | Verdict   | PR                              | Rounds |
-|----------|-----------|---------------------------------|--------|
-| ENG-123  | APPROVED  | https://github.com/.../pull/45  | 1      |
-| ENG-130  | ESCALATED | (no PR — see worktree)          | 3      |
+| Ticket   | Verdict          | PR / Next step                                | Rounds |
+|----------|------------------|-----------------------------------------------|--------|
+| ENG-123  | APPROVED         | https://github.com/.../pull/45                | 1      |
+| ENG-130  | ESCALATED        | (no PR — see worktree)                        | 3      |
+| ENG-141  | DESIGN_HANDOFF   | label `Choose Design` — pick variant          | —      |
+| ENG-142  | AWAITING_HUMAN   | already in `Choose Design` — skipped          | —      |
+| ENG-150  | DESIGN_FAILED    | /linear-design errored — see ticket comment   | —      |
 
-Worktrees still on disk (only ESCALATED/FAILED — APPROVED tickets are
-auto-cleaned by /team-build §6a):
-- /path/to/repo.team-build-eng-130-...  (ENG-130, escalated)
+Worktrees still on disk:
+- ESCALATED/FAILED build worktrees (APPROVED are auto-cleaned by /team-build §6a):
+  - /path/to/repo.team-build-eng-130-...  (ENG-130, escalated)
+- DESIGN_HANDOFF variant worktrees (left intentionally so the human can
+  diff/check out variants before picking — clean up after the pick):
+  - /path/to/repo.team-design-eng-141-variant-a/  branch `team-design/eng-141-variant-a`
+  - /path/to/repo.team-design-eng-141-variant-b/  branch `team-design/eng-141-variant-b`
+  - …
 
 Linear updates posted: <count>
 ```
 
-APPROVED tickets have their worktree + local branch removed
-automatically by `/team-build`. Only ESCALATED/FAILED worktrees
-persist for manual debugging. Do not prompt to clean up APPROVED
-worktrees here — they are already gone.
+APPROVED tickets have their build worktree + local branch removed
+automatically by `/team-build`. ESCALATED/FAILED build worktrees and
+all DESIGN_HANDOFF variant worktrees persist — the former for manual
+debugging, the latter so the human can compare variants before
+picking. Do not prompt to clean up APPROVED worktrees here; do
+surface the DESIGN_HANDOFF variant paths so the user knows what's
+on disk waiting for a decision.
 
 ## Hard rules
 
+- **§3-route runs FIRST, before §3a-pre.** The route decision
+  determines whether this ticket goes through `/linear-design`
+  (DESIGN_EXPLORATION), is skipped entirely (AWAITING_HUMAN), or
+  proceeds through the normal `/team-build` path (BUILD). Never
+  dispatch `/team-build` against a ticket carrying the
+  `Choose Design` label — that ticket is waiting on a human and
+  must be left untouched.
+- **Phase labels mirror the workflow.** During a single
+  `/linear-team-build` run, a ticket on the BUILD path moves
+  through: (start) → `Building` (§3b) → `Testing` (§3d.5) →
+  (cleared at PR open, state = `In Review`, §3e). On the
+  DESIGN_EXPLORATION path: (start) → `Designing` (§3-design step
+  2) → `Choose Design` + `design-explored` (§3-design step 5,
+  state back to `Todo`). Most label transitions are best-effort,
+  but **`design-explored` MUST stick** — it's the structural
+  signal §3-route uses to detect "design already done" and skip
+  re-exploration. Retry once on failure; surface loudly if it
+  can't be written. All other label add/remove failures: log a
+  warning and continue.
+- **Comment at every transition** — except AWAITING_HUMAN.
+  Each phase boundary (design start, variants ready, build start,
+  QA capture start, PR opened, escalation/failure) posts a Linear
+  comment via `linear issue comment add … --body-file`. Silent
+  transitions break the "humans watch the ticket" contract.
+  **AWAITING_HUMAN is the only carve-out:** that path posts no
+  comment and makes no mutation (the ticket is already in the
+  state the human needs it in — re-commenting on every run would
+  spam the ticket).
 - **§3b runs BEFORE any dispatch skill, no matter which one.** The
   ticket must show "In Progress" (or the team's equivalent
   `started`-type state) the entire time the build is running, so
