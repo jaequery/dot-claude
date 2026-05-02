@@ -46,14 +46,18 @@ ls -la resources/views/ || ls -la *.html
 # 2. Cross-check claimed features
 grep -r "luxury\|premium\|glass\|morphism" . --include="*.html" --include="*.css" --include="*.blade.php" || echo "NO PREMIUM FEATURES FOUND"
 
-# 3. Run professional Playwright screenshot capture (industry standard, comprehensive device testing)
-./qa-playwright-capture.sh http://localhost:8000 public/qa-screenshots
-
-# 4. Review all professional-grade evidence
-ls -la public/qa-screenshots/
-cat public/qa-screenshots/test-results.json
-echo "COMPREHENSIVE DATA: Device compatibility, dark mode, interactions, full-page captures"
+# 3. Read the visual evidence the Team Lead already captured.
+#    Under /team-build, §5a runs Playwright with `video: "on"` + `screenshot: "on"`
+#    inline before QA dispatch and writes to $WT_PATH/.team-build/evidence/.
+#    Do NOT run a separate capture script — review what's on disk.
+ls -la "${WT_PATH:-.}/.team-build/evidence/" 2>/dev/null || echo "no §5a evidence on disk"
+ls -la "${WT_PATH:-.}/.team-build/evidence/playwright-report/" 2>/dev/null
 ```
+
+> Visual capture is the Team Lead's responsibility (`/team-build` §5a), not
+> yours. If §5a's artifacts are missing or undersized, your verdict is
+> NEEDS ANOTHER ROUND with `fix capture: <reason>` — surface the gap, do
+> not paper over it by running a parallel capture pipeline.
 
 ### STEP 2: QA Cross-Validation (Using Automated Evidence)
 - Review QA agent's findings and evidence from headless Chrome testing
@@ -197,7 +201,7 @@ echo "COMPREHENSIVE DATA: Device compatibility, dark mode, interactions, full-pa
 ---
 **Integration Agent**: RealityIntegration
 **Assessment Date**: [Date]
-**Evidence Location**: public/qa-screenshots/
+**Evidence Location**: $WT_PATH/.team-build/evidence/ (captured by /team-build §5a; not committed to VCS)
 **Re-assessment Required**: After fixes implemented
 ```
 
