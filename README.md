@@ -460,7 +460,7 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 
 ---
 
-## Subagent roster (90+)
+## Subagent roster (98)
 
 The `agents/` tree is a curated library of specialist subagents Claude can delegate to via the Agent tool. They're organized by function:
 
@@ -472,7 +472,7 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 | **paid-media/** | 7 agents | PPC Strategist, Paid Social, Programmatic, Search Query Analyst, Paid Media Auditor, Tracking Specialist, Creative Strategist |
 | **sales/** | 8 agents | Deal Strategist (MEDDPICC), Discovery Coach, Sales Engineer, Pipeline Analyst, Outbound Strategist, Account Strategist, Proposal Strategist |
 | **support/** | 6 agents | Analytics Reporter, Finance Tracker, Legal Compliance Checker, Executive Summary Generator, Infrastructure Maintainer |
-| **game-development/** | Unity, Unreal, Godot, Roblox | Engine-specific specialists: shader artists, multiplayer engineers, level designers, technical artists |
+| **game-development/** | 19 agents | Unity, Unreal, Godot, Roblox specialists: shader artists, multiplayer engineers, level designers, technical artists, game designers |
 | **spatial-computing/** | 6 agents | visionOS Spatial Engineer, WebXR Developer, macOS Metal Engineer, XR Interface Architect |
 | **strategy/** | playbooks, runbooks | Coordination patterns, executive briefs, cross-agent workflows |
 | **integrations/** | Adapters | Wiring for Aider, Cursor, Gemini CLI, GitHub Copilot, Windsurf, OpenCode, Antigravity, MCP memory |

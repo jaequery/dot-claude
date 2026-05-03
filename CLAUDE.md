@@ -73,7 +73,7 @@ There is no project-wide test, build, or typecheck. The `/code-review` skill's t
 - **The root `.gitignore` is deny-by-default.** New top-level files won't be tracked unless you add an allowlist entry. The allowlisted tree is: `.claude-plugin/**`, `plugins/jaequery/**`, `.gitignore`, `README.md`, `LICENSE`, `CONTRIBUTING.md`. Skill runtime outputs (`plugins/jaequery/skills/market-research/keyword-research-*.{json,md}`) are explicitly ignored.
 - **After adding/renaming an agent,** run `./scripts/lint-agents.sh` and, if downstream integrations matter, `./scripts/convert.sh` and commit the regenerated `agents/integrations/` files.
 - **Skill slugs must match their directory name** — Claude Code resolves `/jaequery:<slug>` from the directory, and the frontmatter `name` is how users will type it. Renaming a skill means renaming the directory and the `name:` field together.
-- **Cross-references between skills are common** (`/next-feature` invokes `/orchestrate`; `/dda` dispatches subagents by name). When renaming, grep for the old name across both `skills/` and `agents/`.
+- **Cross-references between skills are common** (`/dda` and `/next-feature` dispatch subagents by name; `/shark-tank` runs an investor panel of subagents). When renaming, grep for the old name across both `skills/` and `agents/`.
 - **Don't add an `emoji`, `version`, or `color` field to examples in Qwen-targeted docs** — Qwen's SubAgent format only uses `name` and `description` (see `CONTRIBUTING.md` "Tool-Specific Compatibility").
 
 ## Commit style

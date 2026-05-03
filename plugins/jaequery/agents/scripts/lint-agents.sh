@@ -11,17 +11,15 @@
 set -euo pipefail
 
 AGENT_DIRS=(
-  design
-  engineering
   game-development
   marketing
   paid-media
   product
   project-management
-  testing
-  support
+  sales
   spatial-computing
-  specialized
+  strategy
+  support
 )
 
 REQUIRED_FRONTMATTER=("name" "description" "color")
@@ -33,12 +31,17 @@ warnings=0
 lint_file() {
   local file="$1"
 
-  # 1. Check frontmatter delimiters
+  # 1. Skip non-agent docs (planning docs, runbooks, README files, etc.) —
+  # detected by absence of frontmatter. Mirrors convert.sh which silently
+  # skips the same files. If a file was passed explicitly on the command
+  # line, treat missing frontmatter as an error since the user asked.
   local first_line
   first_line=$(head -1 "$file")
   if [[ "$first_line" != "---" ]]; then
-    echo "ERROR $file: missing frontmatter opening ---"
-    errors=$((errors + 1))
+    if [[ "${EXPLICIT_FILES:-0}" == "1" ]]; then
+      echo "ERROR $file: missing frontmatter opening ---"
+      errors=$((errors + 1))
+    fi
     return
   fi
 
@@ -80,8 +83,10 @@ lint_file() {
 
 # Collect files to lint
 files=()
+EXPLICIT_FILES=0
 if [[ $# -gt 0 ]]; then
   files=("$@")
+  EXPLICIT_FILES=1
 else
   for dir in "${AGENT_DIRS[@]}"; do
     if [[ -d "$dir" ]]; then

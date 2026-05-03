@@ -10,8 +10,12 @@ natively with the existing `.md` + YAML frontmatter format.
 ./scripts/install.sh --tool claude-code
 
 # Or manually copy a category
-cp engineering/*.md ~/.claude/agents/
+cp marketing/*.md ~/.claude/agents/
 ```
+
+> Note: The plugin-marketplace install (`/plugin install jaequery@jaequery`) is
+> the canonical path now. The `install.sh` flow above predates the marketplace
+> and is kept for users on older Claude Code versions.
 
 ## Activate an Agent
 

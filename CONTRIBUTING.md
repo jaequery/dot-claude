@@ -32,15 +32,17 @@ Have an idea for a specialized agent? Great! Here's how to add one:
 
 1. **Fork the repository**
 2. **Choose the appropriate category** (or propose a new one):
-   - `engineering/` - Software development specialists
-   - `design/` - UX/UI and creative specialists
    - `marketing/` - Growth and marketing specialists
+   - `paid-media/` - PPC, search/social ad, and tracking specialists
    - `product/` - Product management specialists
    - `project-management/` - PM and coordination specialists
-   - `testing/` - QA and testing specialists
+   - `sales/` - Pre-sale, deal-strategy, and account specialists
    - `support/` - Operations and support specialists
+   - `game-development/` - Engine specialists (Unity, Unreal, Godot, Roblox)
    - `spatial-computing/` - AR/VR/XR specialists
-   - `specialized/` - Unique specialists that don't fit elsewhere
+   - `strategy/` - Cross-functional strategy and orchestration
+
+   > Note: `engineering/`, `design/`, `testing/`, and `specialized/` agents live in the sibling [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Add agents in those domains there.
 
 3. **Create your agent file** following the template below
 4. **Test your agent** in real scenarios
@@ -272,7 +274,7 @@ quickstart guide wearing an agent costume does not.
 ```markdown
 ## Agent Information
 **Agent Name**: [Name]
-**Category**: [engineering/design/marketing/etc.]
+**Category**: [marketing/sales/product/etc.]
 **Specialty**: [One-line description]
 
 ## Motivation
@@ -364,9 +366,9 @@ Contributors who make significant contributions will be:
 ### For New Contributors
 
 - [README.md](README.md) - Overview and agent catalog
-- [Example: Frontend Developer](engineering/engineering-frontend-developer.md) - Well-structured agent example
-- [Example: Reddit Community Builder](marketing/marketing-reddit-community-builder.md) - Great personality example
-- [Example: Whimsy Injector](design/design-whimsy-injector.md) - Creative specialist example
+- [Example: Content Creator](plugins/jaequery/agents/marketing/marketing-content-creator.md) - Well-structured agent example
+- [Example: Reddit Community Builder](plugins/jaequery/agents/marketing/marketing-reddit-community-builder.md) - Great personality example
+- [Example: Analytics Reporter](plugins/jaequery/agents/support/support-analytics-reporter.md) - Reporting specialist example
 
 ### For Agent Design
 

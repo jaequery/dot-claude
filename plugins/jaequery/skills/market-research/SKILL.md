@@ -32,7 +32,7 @@ When invoked, follow these steps:
 Run the keyword research script. Pass the user's seeds via `--only` (the most common case — research exactly what they asked for):
 
 ```bash
-SCRIPT="node /Users/jaelee/.claude/skills/market-research/keyword-research.js"
+SCRIPT="node $CLAUDE_PLUGIN_ROOT/skills/market-research/keyword-research.js"
 
 # Research specific topics
 $SCRIPT --only "date night ideas, romantic restaurants"
@@ -50,7 +50,7 @@ The script scrapes:
 - Reddit post titles (relevance-sorted)
 - Google Trends suggestions (filtered to relevant results)
 
-It outputs (in the skill directory `/Users/jaelee/.claude/skills/market-research/`):
+It outputs (in the skill directory `$CLAUDE_PLUGIN_ROOT/skills/market-research/`):
 - Raw keywords JSON: `keyword-research-raw-YYYY-MM-DD.json`
 - Scored keywords JSON: `keyword-research-scored-YYYY-MM-DD.json`
 - Console output with top 50 keywords by demand signal
@@ -82,7 +82,7 @@ After the script runs, read the scored keywords JSON and the raw keywords JSON. 
 
 ### Step 3: Save the report
 
-Save the full analysis as a markdown report at `/Users/jaelee/.claude/skills/market-research/keyword-research-YYYY-MM-DD.md`.
+Save the full analysis as a markdown report at `$CLAUDE_PLUGIN_ROOT/skills/market-research/keyword-research-YYYY-MM-DD.md`.
 
 ### Important Notes
 

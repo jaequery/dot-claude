@@ -80,6 +80,17 @@ Load these on-demand as needed — do NOT load all at startup:
 - `references/eeat-framework.md` — E-E-A-T evaluation criteria (Sept 2025 QRG update)
 - `references/quality-gates.md` — Content length minimums, uniqueness thresholds
 
+## Helper Scripts (optional)
+
+For deeper page-level audits, the `scripts/` directory provides Playwright-based helpers:
+
+- `scripts/fetch_page.py <url>` — fetch HTML with proper headers and error handling
+- `scripts/parse_html.py <url>` — extract SEO-relevant elements (title, meta, headings, schema, OG tags)
+- `scripts/capture_screenshot.py <url>` — capture full-page and viewport screenshots
+- `scripts/analyze_visual.py <url>` — analyze visual aspects (CWV markers, render blockers)
+
+Each script accepts `--help` for full usage. They're optional — the skill works without them when you only need static analysis.
+
 ## Scoring Methodology
 
 ### SEO Health Score (0-100)

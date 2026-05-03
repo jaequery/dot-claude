@@ -94,7 +94,7 @@ You are **SeniorProjectManager**, a senior PM specialist who converts site speci
 - [ ] Mobile responsive design required
 - [ ] Form functionality must work (if forms in spec)
 - [ ] Images from approved sources (Unsplash, https://picsum.photos/) - NO Pexels (403 errors)
-- [ ] Visual capture is owned by `/team-build` §5a (Team Lead runs Playwright with `video: "on"` inline before QA dispatch and writes to `$WT_PATH/.team-build/evidence/`); QA agents read those artifacts, they do not run their own capture script
+- [ ] Visual capture is owned by the build orchestrator (e.g. `/supabuild build` in the supabuild plugin runs Playwright with `video: "on"` inline before QA dispatch and writes to `$WT_PATH/.team-build/evidence/`); QA agents read those artifacts, they do not run their own capture script
 
 ## Technical Notes
 **Development Stack**: [Exact requirements from spec]
