@@ -24,12 +24,14 @@ This repo is a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/
    /plugin install jaequery@jaequery
    ```
    The syntax is `<plugin-name>@<marketplace-name>`. Both are `jaequery`.
-4. **Verify:** type `/` and look for entries under `jaequery:*`. You should see `/jaequery:team-build`, `/jaequery:shark-tank`, `/jaequery:dda`, etc.
+4. **Verify:** type `/` and look for entries under `jaequery:*`. You should see `/jaequery:dda`, `/jaequery:shark-tank`, `/jaequery:code-review`, etc.
 
 ### Using it after install
 
 - **Skills** — type the slash command, e.g. `/jaequery:shark-tank`, `/jaequery:code-review`, `/jaequery:seo audit https://example.com`. See the [Skill Guides](#skill-guides) below for every skill.
-- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` / `/jaequery:team-build` to assemble a panel automatically.
+- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` to assemble a panel automatically.
+
+> **Note.** Multi-agent build orchestration, design-variant exploration, and Linear/GitHub/Planbooq backlog burndown previously lived here as `/team-build`, `/team-design`, `/linear-team-build`, etc. Those have been consolidated into a separate plugin: [`jaequery/supabuild`](https://github.com/jaequery/supabuild). Install it alongside this one if you want them.
 
 ### Updating
 
@@ -66,13 +68,6 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 
 ### Decision & review
 
-- [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
-- [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
-- [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
-- [`/github-team-build`](#github-team-build) — Burn down the **Todo** column of a GitHub Project (v2) kanban board: one `/team-build` invocation per issue, one PR per issue (auto-closes via `Closes #<n>`); auto-creates the project if missing.
-- [`/planbooq-team-build`](#planbooq-team-build) — Burn down a Planbooq (homebrew Linear clone) "Todo" column via Planbooq's REST API at `https://planbooq.vercel.app`: one `/team-build` invocation per ticket, one PR per ticket; status auto-flips to `Review` once the PR is up.
-- [`/linear-merge-all`](#linear-merge-all) — Burn down the Linear **In Review** queue: find each ticket's GitHub PR, `gh pr merge` sequentially, auto-resolve merge conflicts in a throwaway worktree, transition the ticket to a `completed`-type state on success.
-- [`/linear-design`](#linear-design) — File a Linear ticket for a design task, run `/team-design`, post each variant's screenshots back as comments on the ticket.
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
@@ -99,166 +94,11 @@ A sequenced, zero-to-one operating system:
 ### Utilities
 
 - [`/cmux-diff`](#cmux-diff) — Sidebar diff viewer for the current repo.
-- [`/worktree-task`](#worktree-task) — Run a task in an isolated git worktree.
 - [`/debug-trace`](#debug-trace) — Cursor-style AI debug mode: injects fire-and-forget HTTP probes into source, captures runtime values via a local daemon, removes every probe before exit.
 
 ---
 
 ## Skill Guides
-
-### `/team-build`
-
-**What it does.** Acts as a Team Lead orchestrating a build end-to-end: plans the work, dispatches 2–10 specialist subagents with explicit orders, runs a security audit and a QA + code-review gate, and loops until the work is bug-free. Runs in an isolated git worktree; optionally pushes to a target branch and opens a PR.
-
-**When to use.** Multi-domain features that benefit from a panel of specialists (UI + backend + security) and where you want a hard QA gate before shipping. Not for trivial edits.
-
-**How to invoke.** `/team-build <task>` or *"build this with a team"*, *"team-build"*, *"chief executive build"*. Optional `--branch <target>` to auto-push and open a PR against that branch. Optional `--working-branch <name>` to override the auto-generated `team-build/<slug>-<ts>` branch (used verbatim, no prefix added — useful for honoring upstream conventions like Linear's suggested `branchName`).
-
-**What you get.** Worktree at `../<repo>.team-build-<slug>-<ts>` on branch `team-build/<slug>-<ts>` (or your `--working-branch` override). **Discovery batch** (one `AskUserQuestion` round covering scope, success criteria, data, integrations, non-functional requirements, delivery, constraints — skipped only when invoked by another skill that already supplies a full brief) → **fully thought-out plan** (goal, falsifiable success criteria, explicit out-of-scope, architecture sketch with new/modified files + data + surfaces + env, risks & mitigations, verification map criterion→proof, scoped agent orders, sequencing) → **per-worktree DB branch** (auto-detected from docker-compose: Postgres / MySQL / Mongo; creates an isolated logical DB so parallel worktrees don't trample each other's data; ORM-agnostic bootstrap tries package.json/Makefile/alembic/Django/Rails/Go conventions; auto-dropped on cleanup) → roster → parallel build round → integration check → security audit → **polish & gap pass** (edge cases, loading/empty/error states, a11y, responsive, observability, docs, "what would the user notice in 24h") → code-review + QA gate → **visual evidence pass** (language-agnostic `playwright-cli` walkthrough video + step screenshots driven against the booted dev server — works for PHP/Laravel, Django, Rails, Go, Node, anything that boots an HTTP server; existing Playwright/Cypress test runs are an *optional bonus*, not a gate; terminal transcripts for CLI/backend; everything captured to `.team-build/evidence/` on disk for the orchestrator to upload — NOT committed, since QA artifacts don't belong in VCS) → APPROVED report (or up to 3 fix rounds). With `--branch`, a **merge-conflict preflight + post-rebase guard** (refuses to push if `merge-tree` reports conflicting paths against the target, the rebase leaves unmerged entries, or any `<<<<<<<`/`=======`/`>>>>>>>` markers survive), a typed-`yes` push gate, `gh pr create`, then **automatic cleanup** — the worktree and local branch are removed once the PR is open (the work lives on origin). ESCALATED/FAILED runs keep the worktree for manual debugging.
-
-**How it works.** Hard rules: never write to the main working tree, never bypass hooks, never `--no-verify`, push only after typed-`yes`. The Lead never claims completion without the QA + code-review gate passing.
-
-**Example.**
-
-```
-/team-build add OAuth login with Google and GitHub --branch main
-```
-
-*Spins up a worktree, fields a Team Lead with a backend, frontend, security, and code-review squad, builds across them in parallel, audits the diff, and opens a PR against `main` only after the QA gate passes.*
-
----
-
-### `/team-design`
-
-**What it does.** A world-class Design Lead generates **2–10 divergent design variants** of the same task in parallel — each on its own isolated git worktree and branch — so the human can preview and pick the direction. Variants are required to diverge on the axes that actually differentiate work (typography, motion, color, density, voice); cousin-variants are critiqued back. Each variant gets a per-thesis team (UI Designer, Frontend Developer, Accessibility Auditor, Whimsy Injector when warranted, etc.) dispatched in parallel, then the Lead reviews every variant against its own thesis and either passes, sends it back for one scoped redo, or kills it. Final lineup ships as `team-design/<slug>-<variant>` branches with screenshots committed inline.
-
-**When to use.** Greenfield design work where the brief is open enough to support real divergence: landing pages, brand directions, dashboard skins, marketing-site rebuilds, onboarding flows, hero treatments. Not for tweaking an existing component to spec — that's a single-track `/team-build`.
-
-**How to invoke.** `/team-design <task description> [flags]`. Flags: `--variants <N>` (2–10, default 4), `--target-branch <branch>` (PR base if you ship), `--branch-prefix <prefix>` (default `team-design`), `--reference <url|path>` (repeatable — Figma file, Dribbble link, competitor URL).
-
-**What you get.** Lead's brief (named directions, not "variant 1/2/3") → N parallel worktrees at `../<repo>.team-design-<slug>-<variant>-<ts>` on branches `team-design/<slug>-<variant>` → per-variant team dispatched in parallel → Playwright screenshots (desktop + mobile + interactive state) committed to each variant's branch → Lead's critique scoring each variant on thesis fidelity / craft / differentiation / verdict (PASS/REDO/KILL) → **visual gallery auto-opened in the browser** (static HTML at `.team-design/gallery-<slug>-<ts>/`, all variants side-by-side with click-to-zoom screenshots, scores, and Pick/Redo/Kill buttons that round-trip to a tiny localhost server) → terminal picker fallback with `(g)allery`, `(p)review`, `(d)iff`, `(o)pen`, `(s)hip`, `(k)ill`, `(c)ompare`, `(a)dopt`, `(q)uit` actions. With `--target-branch`, `s all` ships every PASS variant as a separate PR.
-
-**How it works.** The Lead is opinionated on purpose — Awwwards/FWA-tier bar, weekly trend literacy, refuses to flatter the team. Loop cap: 2 redos per variant before auto-KILL. Hard rules: variants must diverge (cousin-variants are a Lead failure, not a feature); one worktree per variant with no cross-variant writes; PASS verdict requires committed screenshots — words don't ship design; never auto-replace a KILLED variant mid-flight (kills are kept visible to the user); never `--no-verify`, never bypass push gates. Inherits `/team-build`'s §1.5 per-worktree DB branching when a docker-compose DB service is detected, so seeded variants don't trample each other.
-
-**Example.**
-
-```
-/team-design redesign the landing page for a B2B AI infra startup --variants 5 --reference https://linear.app
-```
-
-*Lead announces 5 named directions (e.g. `editorial-serif`, `swiss-grid`, `kinetic-mono`, `terminal-utility`, `glass-prismatic`), spins up 5 worktrees + branches, dispatches a tailored 3-agent team per variant in parallel, each variant captures desktop + mobile + interactive shots, Lead critiques and ships the picker — typically 3–4 PASS, 1–2 REDO/KILL.*
-
----
-
-### `/linear-team-build`
-
-**What it does.** Pulls every Linear ticket in **Todo** status and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per ticket**. Never bundles tickets.
-
-**When to use.** Burning down a triaged Linear backlog autonomously, where each ticket is sized for a single PR and you want the orchestrator to handle Linear state transitions and PR creation.
-
-**How to invoke.** `/linear-team-build [task description] [flags]`. If you pass a free-form task description as the positional arg, the skill **creates a new Linear ticket in Todo first** (on `--team`, optionally assigned to `--assignee`), then includes it in this run's queue — so a single command both files the work and burns it down. Flags: `--team <key>`, `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default: 1 / sequential; pass a number to parallelize; warns above 5 but does not cap), `--dry-run`. Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and authed `gh`.
-
-**What you get.** Numbered ticket queue → per-ticket route decision (DESIGN_EXPLORATION / AWAITING_HUMAN / BUILD) → per-ticket loop (**move state to "In Progress" FIRST — before any comment, so the Linear sidebar always reflects "the bot is working on this" the instant any observer opens the ticket** → post the "🤖 picked up by /linear-team-build" announce comment → resolve target branch → **hydrate `uploads.linear.app` images** embedded in the description and attachments by curling them with the CLI's auth token (`linear auth token`) into `/tmp/ltb-img-<id>-<n>.<ext>` so the Team Lead can `Read` them with vision instead of just seeing opaque URLs (capped at 8/ticket; missing token or 4xx downgrades to skip, never blocks) → add `Building` label + post a "build started" status comment with working branch / target / mode → invoke `/team-build` → verify exactly one new PR appeared → for UX/design tickets, locate the `playwright-cli` walkthrough artifacts produced during `/team-build`'s QA pass and upload **two tracks in parallel**: (a) the `00-walkthrough.{webm,mp4}` video + up to 3 step stills uploaded individually so they render **inline** in the ticket comment under `### Walkthrough`, and (b) **only when the optional Playwright test bonus ran** (JS/TS repos with `playwright.config.*`), the full Playwright HTML report zipped and attached for download under `### Playwright report` → comment PR URL with both sections (each best-effort and independent — a failed zip never blocks the inline preview, and vice versa; the report section is omitted entirely on non-JS repos) → move to "In Review") → final summary table. **Phase labels track sub-stages:** `Designing` (during `/linear-design`) → `Choose Design` (variants posted, awaiting human) → `Building` (during `/team-build`) → `Testing` (during QA capture) → cleared at PR open. **Design routing:** UI-flavored tickets (label or keyword detection) automatically route through `/linear-design` first to produce divergent variants; the ticket goes back to Todo with `Choose Design`, the human picks, and a re-run of `/linear-team-build` resumes straight to `/team-build` with the chosen direction. **Bug-report counter-signals override design routing:** a title prefixed with `Bug:` or a description containing both `Expected:` and `Actual:` forces the BUILD path even when a UI keyword fires — defects with a binary "what should happen" requirement go straight to `/team-build` instead of wasting a `/team-design` round on a ticket whose fix isn't divergent. Stakeholders following the ticket in Linear see status comments at every transition without watching the terminal.
-
-**How it works.** All Linear reads/writes go through the `linear` CLI — `linear issue query --json` to fetch the queue, `linear issue update --state` for transitions, `linear issue comment add --body-file` for comments. No raw GraphQL `curl`. **Per-run cache** (`/tmp/ltb-cache-$$/`) holds each ticket's full issue JSON (written once in §2, read by §3-state / §3a-pre / §3d / §3e instead of re-running `linear issue view`) and each team's `WorkflowState` list (fetched once on first lookup, reused across §3-state, §3-design, §3e). Cuts ~3 Linear reads per ticket and lets parallel mode share already-fetched data across jobs. **Within-ticket parallelism**: §3a-img backgrounds up to 8 `uploads.linear.app` image downloads concurrently using the run-level `LINEAR_TOKEN` derived once at preflight; §3d.5 fans out the report-zip + walkthrough-video + up-to-3-stills uploads to Linear's `fileUpload` mutation in parallel and `wait`s before collecting the asset URLs (≈5× one upload → ≈1× the slowest on a slow link). **Working branch defaults to Linear's suggested `branchName`** (e.g. `jaequery/pin-56-...`) and is passed to `/team-build` via `--working-branch`; only falls back to `team-build/<slug>-<ts>` when Linear has none. Per-ticket *target* branch (PR base) resolution: description directive (`Target: <branch>`) → label (`target:<branch>`) → Linear linked branch attachment → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed tickets move back to Todo with a comment. Embeds a clean-code bar (reuse existing patterns, minimal diff, no dead code, validate at boundaries) into every per-ticket prompt for the Team Lead's code-review gate to enforce. **Push is not gated** — `/team-build`'s typed-`yes` push confirmation is explicitly skipped so backlog burndown stays autonomous; the PR itself is the review surface.
-
-**Example.**
-
-```
-/linear-team-build --team ENG --limit 5
-```
-
-*Pulls the top 5 ENG-team Todo tickets, processes each one sequentially: own worktree, own branch (`team-build/eng-123-…`), own PR. Linear state moves Todo → In Progress → Reviewing per ticket; final table shows verdicts and PR URLs.*
-
----
-
-### `/github-team-build`
-
-**What it does.** Pulls every issue in the **Todo** column of a GitHub Project (v2) kanban board and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per issue**. Each PR body includes `Closes #<n>` so merging auto-closes the issue. Never bundles issues. Auto-creates the project (with a **board/kanban view grouped by Status as the default**) + extends its Status field with the full lifecycle options (`Backlog`, `Planning`, `Todo`, `In Progress`, `Reviewing`, `QA`, `Completed`) if missing.
-
-**When to use.** Burning down a triaged GitHub Project board autonomously, where each issue is sized for a single PR and you want the orchestrator to handle Status transitions, comments, and PR creation through the project's native kanban.
-
-**How to invoke.** `/github-team-build [task description] [flags]`. If you pass a free-form task description as the positional arg, the skill **creates a new GitHub issue, adds it to the project, and sets its Status to Todo first**, then includes it in this run's queue — so a single command both files the work and burns it down. Flags: `--repo <owner/name>` (default: current repo), `--project <number|title>` (default: first project linked to the repo, or auto-create one titled `<repo-name>`), `--owner <login>` (default: owner of `--repo`), `--assignee <@me|login>`, `--limit <n>` (default 10), `--target <branch>` (default: repo default branch), `--parallel <n>` (default: 1 / sequential; warns above 5 but does not cap), `--dry-run`. Requires authed `gh` with `project` scope (`gh auth refresh -s project` if missing).
-
-**What you get.** Numbered issue queue → per-issue loop (resolve target branch → flip project Status to `In Progress` → **post a "build started" status comment** with working branch / target / mode → invoke `/team-build` with `--working-branch <number>-<kebab-title>` → verify exactly one new PR appeared and contains `Closes #<n>` → for UX/design issues, capture desktop+mobile+state screenshots via Playwright, commit them to the PR branch, embed via `raw.githubusercontent.com` URLs → comment PR URL → flip Status to `Reviewing`) → final summary table. Issue auto-closes on PR merge; downstream automation/humans drive `QA` and `Completed`.
-
-**How it works.** All GitHub reads/writes go through `gh` — `gh project list/create/link`, `gh project field-list/field-edit` (resolve & extend the Status field), `gh project item-list --format json` (filter to `status == "Todo"`), `gh project item-edit` (set Status), `gh issue view/comment`, `gh pr list/edit`. No raw `curl`. The full kanban lifecycle is `Backlog → Planning → Todo → In Progress → Reviewing → QA → Completed`; the skill only writes the middle three (`Todo` ↔ `In Progress` ↔ `Reviewing`), humans/downstream drive the rest. **Working branch defaults to GitHub's "Create branch" convention** (`<number>-<kebab-title>`, truncated to 60 chars) and is passed to `/team-build` via `--working-branch`; an explicit `Branch: <name>` line in the issue body overrides it. Per-issue *target* branch resolution: body directive (`Target: <branch>`) → label (`target:<branch>`) → `--target` default. Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Failed issues are flipped back to `Todo` with a comment. Embeds the same clean-code bar as `/linear-team-build` into every per-issue prompt. **Push is not gated** — the PR itself is the review surface.
-
-**Example.**
-
-```
-/github-team-build --repo myorg/myapp --limit 5
-```
-
-*Resolves (or creates) the project linked to `myorg/myapp`, ensures its Status field has the seven kanban options, pulls the top 5 issues currently in Todo, processes each one sequentially: own worktree, own branch (`123-add-oauth-login`), own PR with `Closes #123` in the body. Project Status moves Todo → In Progress → Reviewing per issue; final table shows verdicts and PR URLs.*
-
----
-
-### `/planbooq-team-build`
-
-**What it does.** Pulls every ticket in the **Todo** kanban column of a Planbooq workspace (Planbooq is our homebrew Linear clone) and runs `/team-build` on each one independently — **one isolated worktree, one branch, one PR per ticket**. Each PR body includes a `Closes Planbooq ticket: <id> (<url>)` backlink. Never bundles tickets.
-
-**When to use.** Burning down a triaged Planbooq board autonomously — `Backlog` is the human triage stage, `Todo` is the ready-for-work input queue this skill consumes. Each ticket should be sized for a single PR and the orchestrator handles status transitions, comments, and PR creation through Planbooq's REST API.
-
-**How to invoke.** `/planbooq-team-build [task description] [flags]`. Positional arg creates the ticket on the fly (in `Todo`) before the queue runs. Flags: `--workspace <id|slug>` (default: the only workspace visible to the token), `--project <id|slug>` (auto-created from the current GitHub repo name if it doesn't exist yet), `--assignee <me|email|userId>`, `--limit <n>` (default 10), `--target <branch>` (default `main`), `--parallel <n>` (default 1; warns above 5 but does not cap), `--dry-run`. Requires `PLANBOOQ_API_KEY` (`pbq_live_…` from Settings → API Keys) — if it's missing, the skill **prompts once** and persists it to `~/.planbooq/.env` (legacy `~/.claude.json` `env` block is still read for back-compat) so future sessions never re-prompt. The base URL defaults to `https://planbooq.vercel.app` and is overridable via `PLANBOOQ_BASE_URL` in `~/.planbooq/.env` (e.g. `http://localhost:3636` for local dev, or any custom deployment — host root only; the skill appends `/api/v1`).
-
-**What you get.** Numbered ticket queue → per-ticket route decision (DESIGN_EXPLORATION / AWAITING_HUMAN / BUILD, mirroring `/linear-team-build`) → per-ticket loop (**move status to `Building` FIRST — before any comment, so the Planbooq board always reflects "the bot is working on this" the instant any observer opens the ticket** → post the "🤖 picked up by /planbooq-team-build" announce comment → resolve target branch → invoke `/team-build` with `--working-branch <pbq-id>-<kebab-title>` and a **verification bar** requiring the build to restate the ticket's acceptance criteria, map each one to evidence, run those checks before requesting review, and write them into the PR body under `## Verification` → verify exactly one new PR appeared and contains the Planbooq backlink → for UX/design tickets (any UI-bearing diff, any verdict where a PR was opened — not just APPROVED), locate or build a single `playwright-report.zip` from the QA run (Playwright HTML report already contains every screenshot, trace, and video), commit it to the PR branch under `.planbooq-team-build/shots/<id>/`, push, and reference via `raw.githubusercontent.com` → comment PR URL + a `### Verification` block + a `### Playwright report` link → `PATCH /tickets/{id}` with `{prUrl}` so the PR shows up in the ticket's native "Add PR link" slot → move ticket to `Review`) → final summary table. **Phase labels track sub-stages:** `Designing` (during `/team-design`) → `Choose Design` + `design-explored` (variants posted, awaiting human) → `Building` (during `/team-build`) → `Testing` (during QA capture) → cleared at PR open. **Design routing:** UI-flavored tickets (label or keyword detection) automatically route through `/team-design` first to produce divergent variants on per-variant branches; the ticket goes back to Todo with `Choose Design`, the human picks (adds `design-selected` or removes `Choose Design`), and a re-run resumes straight to `/team-build`. Status transition is keyed off **whether a PR was opened** (any verdict), not the local QA gate — the PR is the review surface. Stakeholders following the ticket in Planbooq see status comments at every transition without watching the terminal.
-
-**How it works.** All Planbooq reads/writes go through the REST API at `${PLANBOOQ_BASE_URL:-https://planbooq.vercel.app}/api/v1` with `Authorization: Bearer $PLANBOOQ_API_KEY` and the `{ ok, data | error }` response envelope. No MCP, no SDK, no scraping. Endpoints used: `GET /workspaces`, `GET /workspaces/{id}/{members,statuses,projects}`, `GET /tickets?…&statusId=…`, `GET /tickets/{id}`, `POST /tickets`, `PATCH /tickets/{id}`, `POST /tickets/{id}/move` (`{ toStatusId }`), `POST /tickets/{id}/comments` (`{ body }`). PRs are still opened via `gh` against GitHub. Planbooq's default board is `Backlog → Todo → Building → Review → Shipping`; this skill only writes the middle three (`Todo → Building → Review`), humans drive `Backlog → Todo` triage and `Review → Shipping` promotion. **`Todo` and `Review` are mandatory** — preflight aborts if the workspace's status list lacks either. Honours Planbooq's payload constraints (title ≤200, description ≤5000, comment ≤10000, `priority ∈ NO_PRIORITY|URGENT|HIGH|MEDIUM|LOW`, `color = #rrggbb`). Snapshots `gh pr list` before/after each invocation; STOPs the loop if zero or more than one new PR appears. Embeds the same clean-code bar as `/linear-team-build` and `/github-team-build` into every per-ticket prompt. **Push is not gated** — the PR itself is the review surface, even on ESCALATED/FAILED verdicts.
-
-**Example.**
-
-```
-/planbooq-team-build --workspace personal --project tierbuddy --limit 5
-```
-
-*Resolves the `personal` workspace and `tierbuddy` project, validates the board has `Todo` / `Building` / `Review` columns, pulls the top 5 tickets currently in Todo, processes each sequentially: own worktree, own branch (`pbq-123-add-oauth-login`), own PR with the Planbooq backlink. Status moves Todo → Building → Review per ticket; final table shows verdicts and PR URLs.*
-
----
-
-### `/linear-merge-all`
-
-**What it does.** Pulls every Linear ticket sitting in **In Review** (or the team's equivalent — `Code Review`, `Reviewing`, `PR Review`, `Ready for Review`), finds each ticket's linked GitHub PR, and merges them **sequentially** with `gh pr merge`. On merge conflicts, fetches the PR branch into a throwaway worktree, rebases against the target, **resolves conflicts in place** (mechanical conflicts auto-resolved; semantic conflicts ESCALATED with a Linear comment), force-pushes with `--force-with-lease`, and retries the merge. After each successful merge, transitions the Linear ticket to the team's first `completed`-type state (`Done` / `Merged` / `Shipped` / `Released` / `Completed`) and refreshes local `main` so the next PR rebases against the just-merged change.
-
-**When to use.** You have a stack of human-reviewed tickets in `In Review` and want to land them in one pass without manually clicking merge on each PR — especially when later PRs in the queue need to rebase against earlier ones to stay clean.
-
-**How to invoke.** `/linear-merge-all [flags]`. Flags: `--team <key>` (Linear team), `--assignee <me|email|userId>`, `--limit <n>` (default 50), `--target <branch>` (only merge PRs whose **base** matches; default: repo's default branch), `--method <squash|merge|rebase>` (default `squash`), `--admin` (pass `--admin` to `gh pr merge` to bypass branch protection), `--state <name>` (override In-Review-state auto-detect), `--state-after <name>` (override completed-state auto-detect), `--no-state-update` (post the comment but leave the ticket in its current state — for downstream automation that owns the transition), `--skip-conflicts` (skip rather than resolve conflicts), `--dry-run` (list what would be merged with each PR's mergeable status). Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once), authed `gh`, and `jq`.
-
-**What you get.** Numbered queue with per-PR mergeable status (`CLEAN` / `BEHIND` / `DIRTY` / `BLOCKED` / `UNSTABLE` / `UNKNOWN`) → per-PR sequential loop (re-check status right before merge → branch by status: BEHIND → `gh pr update-branch` → CLEAN → `gh pr merge --<method> --delete-branch` → DIRTY → conflict-resolution worktree at `../<repo>.lma-pr-<number>` → rebase against latest base → AI-resolves mechanical conflicts (lockfiles regenerated via the project's package manager, whitespace/import collisions auto-merged) → ESCALATES semantic conflicts with a Linear comment naming the file and reason → runs `lint` / `tsc --noEmit` sanity checks if available before force-pushing → re-attempts merge → on success: posts `### ✅ merged by /linear-merge-all` comment with PR URL, method, merge SHA, and conflict notes if any → transitions Linear to first `completed`-type state) → final results table with `MERGED` / `BLOCKED` / `DRAFT` / `NO_PR` / `WRONG_BASE` / `CONFLICTED` / `ESCALATED` / `MERGE_FAILED` verdicts. ESCALATED worktrees stay on disk so the human can pick up where the bot stopped.
-
-**How it works.** All Linear interactions go through the `linear` CLI (state list cached per-team in `/tmp/lma-cache-$$/states-<TEAM_KEY>.json`, issue JSON cached per ticket — never re-fetched). All GitHub interactions go through `gh` (`gh pr view --json mergeable,mergeStateStatus`, `gh pr merge`, `gh pr update-branch`, `gh pr list --search` as PR-resolution fallback when Linear's `attachments.nodes[]` doesn't contain a github.com/.../pull/N URL). State resolution is filtered by `WorkflowState.type` so the auto-detect *can never* fuzzy-match into the wrong group — input state must be `type=="started"` and a `review`-flavored name; output state must be `type=="completed"`. **Sequential only** — the per-PR loop is not parallelized, because PR N+1 may rebase cleanly only because PR N landed first; parallelism would race on `main` updates and undo the conflict-avoidance benefit of running the queue in priority order. After each merge, `git fetch origin <base>` updates the ref tracking origin (and fast-forwards the local checkout if the user happens to be on the base branch) so §4a's mergeable re-check on the next PR sees the new HEAD. Hard rules: never push to `main` directly (always via `gh pr merge`), never `git push --force` without `--with-lease`, never `--no-verify`, never resolve conflicts in the main working tree (always in a throwaway worktree), never transition a Linear ticket to a non-`completed`-type state as the post-merge transition. **This skill IS the human merge action** — unlike `/linear-team-build` where the bot must stop at `In Review` (because moving past it would silently ship unreviewed code), `/linear-merge-all` is invoked by a human who has already reviewed the work and is explicitly asking to ship it.
-
-**Example.**
-
-```
-/linear-merge-all --team ENG --method squash
-```
-
-*Pulls every ENG-team ticket in `In Review`, sorts oldest-first within priority, processes each sequentially: re-checks PR status, squash-merges if CLEAN, runs `gh pr update-branch` if BEHIND, spins up a `lma-pr-<n>` worktree to rebase + resolve if DIRTY, posts a merge comment to Linear with the PR URL and merge SHA, transitions the ticket to `Done`, refreshes local `main`, then moves to the next ticket. Final table shows MERGED / ESCALATED / SKIPPED counts and lists any worktrees still on disk for the human to clean up.*
-
----
-
-### `/linear-design`
-
-**What it does.** Files a Linear ticket for a design task, runs `/team-design` to produce divergent variants in parallel, then posts each variant's screenshots back to the ticket as a comment so stakeholders who don't live in the terminal can review and pick from Linear.
-
-**When to use.** Design exploration where the picker audience (PM, design lead, founder) reviews in Linear, not in the terminal. Skip if you're solo and a local picker is enough — use `/team-design` directly.
-
-**How to invoke.** `/linear-design <task description> [flags]`. Linear flags: `--team <key>` (required unless single-team workspace), `--priority <0-4>`, `--label <name>` (repeatable), `--assignee <me|email|userId>`, `--project <name|id>`, `--existing <IDENT>` (attach to an existing ticket instead of creating). Passthrough to `/team-design`: `--variants <N>`, `--target-branch`, `--branch-prefix`, `--reference` (repeatable). Requires the [`@schpet/linear-cli`](https://github.com/schpet/linear-cli) (`linear auth login` once) and `jq` + `curl`.
-
-**What you get.** New Linear ticket with the brief in the description → `/team-design` runs end-to-end → one comment per variant on the ticket with desktop / mobile / interactive screenshots embedded as Linear-hosted assets (uploaded via the `fileUpload` mutation), thesis, branch name, Lead's scores, and critique → final summary comment with the picker table. Local `/team-design` picker prints to the terminal as usual; shipping is a separate local action.
-
-**How it works.** All Linear reads/writes go through the `linear` CLI. `linear api` is used only as the escape hatch for `fileUpload` (signed URL → PUT bytes → embed `assetUrl` in markdown) and `issueCreate` fields not exposed by structured subcommands — never raw `curl` to the GraphQL endpoint. Hard rules: one ticket per run, one comment per variant (never batched), every PASS/REDO comment includes uploaded screenshots (or an explicit "shots not captured" note), never auto-transitions the ticket's workflow state, never auto-ships from Linear comments.
-
-**Example.**
-
-```
-/linear-design redesign the pricing page with 3 directions --team DSGN --variants 3 --priority 2
-```
-
-*Creates `DSGN-87` with the brief, runs `/team-design` for 3 variants in parallel, uploads each variant's screenshots to Linear and posts them as comments inline, ends with a picker summary comment — reviewers see and discuss directly on the ticket while the operator runs the local picker to ship.*
-
----
 
 ### `/next-feature`
 
@@ -598,28 +438,6 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 
 ---
 
-### `/worktree-task`
-
-**What it does.** Runs a task in an isolated git worktree so it doesn't conflict with in-flight changes in your main checkout.
-
-**When to use.** Single-session tasks that need filesystem / branch isolation from the main working tree. **Not** for multi-session parallel work or security sandboxing — worktrees don't isolate env vars, network, credentials, or spawned processes.
-
-**How to invoke.** `/worktree-task <task>`, or *"do X in a worktree"*, *"run this in an isolated branch"*, *"work on Y without conflicting with my current changes"*, *"spin up a worktree for Z"*.
-
-**What you get.** A new worktree + branch (`wt/<slug>-<ts>`) at a sibling path, the task executed there, then a 5-option cleanup menu: (a) keep, (b) merge, (c) rebase + push + PR, (d) discard, (e) stash and keep, (f) adopt branch into main tree.
-
-**How it works.** Thin auditable wrapper around `git worktree add`. Uses `cd "$WT_PATH" && …` per call since cwd doesn't persist. Enforces typed-`yes` gates on destructive ops, `--force-with-lease` on push, and merge-base safety checks before `-d` / `-D`. Preflight aborts on submodule / detached-HEAD / path-collision without explicit user direction.
-
-**Example.**
-
-```
-/worktree-task refactor the auth middleware to use jose instead of jsonwebtoken
-```
-
-*Creates `../repo-wt/refactor-auth-20260416/` on branch `wt/refactor-auth-20260416`, runs the refactor inside it without touching your in-flight changes in the main checkout, then offers the 5-option cleanup menu — pick (c) to push and open a PR.*
-
----
-
 ### `/debug-trace`
 
 **What it does.** Cursor-style runtime instrumentation debugger. Spins up a tiny localhost daemon, injects fire-and-forget HTTP probes into the user's source at suspect sites, captures runtime values as the program runs, reads them back through the daemon, iterates toward a fix, and **removes every probe before exiting**. Print-debugging on autopilot, with cleanup as a hard invariant.
@@ -666,23 +484,17 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 ### Why the roster is good
 
 - **Specialists, not generalists.** Each agent has a narrow charter and opinions. No "helpful assistant" filler.
-- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` or `/team-build` assembles a panel.
+- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` assembles a panel.
 - **Global-market coverage.** The marketing roster covers both Western and Chinese platforms at native depth — rare in public agent collections.
-- **Composable.** The Agents Orchestrator, `/team-build`, and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
+- **Composable.** The Agents Orchestrator and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
 
 ---
 
 ## Layout
 
 ```
-~/.claude/
-├── README.md                    ← you are here
+plugins/jaequery/
 ├── skills/                      ← custom slash commands
-│   ├── team-build/
-│   ├── team-design/
-│   ├── linear-team-build/
-│   ├── github-team-build/
-│   ├── linear-design/
 │   ├── next-feature/
 │   ├── dda/
 │   ├── code-review/
@@ -692,7 +504,7 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 │   ├── market-research/
 │   ├── marketing-reddit/
 │   ├── cmux-diff/
-│   ├── worktree-task/
+│   ├── debug-trace/
 │   └── startup-*/               ← six-skill Paul Graham playbook
 └── agents/                      ← specialist subagent roster
     ├── engineering/
@@ -710,14 +522,14 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 
 ## Using it
 
-**Skills:** type the slash command (e.g. `/dda`, `/team-build`, `/shark-tank`) in Claude Code. They're auto-discovered from `~/.claude/skills/`.
+**Skills:** type the slash command (e.g. `/dda`, `/shark-tank`, `/code-review`) in Claude Code. They're auto-discovered after install.
 
-**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda` or `/team-build`, which assemble the right panel or teams for you.
+**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda`, which assembles the right panel for you.
 
 ## The pattern
 
 Skills codify *workflows* — the sequence of steps you'd want every time.
 Agents codify *perspectives* — the domain lens a specialist brings.
-`/dda`, `/team-build`, and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
+`/dda` and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
 
 That's the whole philosophy of this repo.
