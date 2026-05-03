@@ -66,6 +66,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 
 ### Decision & review
 
+- [`/supabuild`](#supabuild) — Unified router that dispatches to `build` / `design` / `linear` / `worktree` based on the first token. `/supabuild` alone defaults to `build`. One slash command for the full multi-agent toolkit.
 - [`/team-build`](#team-build) — Team Lead orchestrates 2–10 specialist subagents in an isolated worktree, with security audit + QA gate, and opens a PR.
 - [`/team-design`](#team-design) — Design Lead generates 2–10 *divergent* design variants in parallel, each on its own worktree + branch (`team-design/<slug>-<variant>`), with screenshots, for the human to pick.
 - [`/linear-team-build`](#linear-team-build) — Burn down a Linear "Todo" queue: one `/team-build` invocation per ticket, one PR per ticket.
@@ -105,6 +106,30 @@ A sequenced, zero-to-one operating system:
 ---
 
 ## Skill Guides
+
+### `/supabuild`
+
+**What it does.** A unified router that dispatches to four modes based on the first whitespace-delimited token of the arguments: `build` (multi-agent build), `design` (parallel design variants), `linear` (Linear backlog burndown), `worktree` (isolated worktree task runner). When invoked without a mode token, defaults to `build`.
+
+**When to use.** When you'd rather remember one slash command than four. The individual skills (`/team-build`, `/team-design`, `/linear-team-build`, `/worktree-task`) still exist; `/supabuild` is just a single entry point that routes to the same logic.
+
+**How to invoke.**
+- `/supabuild build <task>` — equivalent to `/team-build <task>`.
+- `/supabuild design <task>` — equivalent to `/team-design <task>`.
+- `/supabuild linear` — burns down every Linear ticket in **Todo** status, one PR per ticket. No flags needed.
+- `/supabuild linear <task description>` — first creates a Linear ticket from your description, then includes it in the burndown run (e.g. `/supabuild linear fix login issue`).
+- `/supabuild worktree <task>` — equivalent to `/worktree-task <task>`.
+- `/supabuild <task>` — no mode token, defaults to `build`.
+
+**Example.**
+
+```
+/supabuild design redesign the pricing page
+/supabuild linear
+/supabuild fix the failing webhook test
+```
+
+---
 
 ### `/team-build`
 

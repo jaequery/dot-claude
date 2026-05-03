@@ -1,7 +1,7 @@
 {
   "name": "jaequery",
-  "version": "1.8.1",
-  "description": "Jae Lee's full arsenal: 24 slash-command skills (startup planning, team-led builds, parallel design variants, Linear + GitHub-Issues + Planbooq backlog burndown, Linear In-Review queue merge-all with conflict resolution, design ticket flow, code review, SEO, Reddit marketing, git audit, diff viewer, Cursor-style runtime debug-trace) plus 167 specialist subagents across engineering, design, product, marketing, paid-media, sales, game-dev, and specialized domains.",
+  "version": "1.8.2",
+  "description": "Jae Lee's full arsenal: 25 slash-command skills (unified /supabuild router for build/design/linear/worktree, startup planning, team-led builds, parallel design variants, Linear + GitHub-Issues + Planbooq backlog burndown, Linear In-Review queue merge-all with conflict resolution, design ticket flow, code review, SEO, Reddit marketing, git audit, diff viewer, Cursor-style runtime debug-trace) plus 167 specialist subagents across engineering, design, product, marketing, paid-media, sales, game-dev, and specialized domains.",
   "author": {
     "name": "Jae Lee",
     "url": "https://github.com/jaequery"
