@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "jaequery",
-      "description": "Jae Lee's curated arsenal — 16 skills + 98 specialist subagents bundled into one install.",
+      "description": "Jae Lee's curated arsenal — 16 slash-command skills (Paul Graham startup playbook, Deep Dive Analysis, Shark Tank, code review, SEO, market research, debug-trace, etc.). Pair with the supabuild plugin for the 161 specialist subagents these skills dispatch.",
       "source": "./plugins/jaequery",
       "homepage": "https://github.com/jaequery/dot-claude"
     }

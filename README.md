@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — custom slash-command skills and a curated roster of 90+ specialist subagents, published as a single **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated team of domain experts. Engineering, design, specialized, and testing agents, plus the multi-agent build / design-variants / Linear-burndown skills, now ship in the companion **supabuild** plugin.
+My personal Claude Code arsenal — 16 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -28,10 +28,14 @@ This repo is a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/
 
 ### Using it after install
 
-- **Skills** — type the slash command, e.g. `/jaequery:shark-tank`, `/jaequery:code-review`, `/jaequery:seo audit https://example.com`. See the [Skill Guides](#skill-guides) below for every skill.
-- **Subagents** — Claude dispatches these via the Agent tool. Ask in natural language (*"have a Security Engineer review this diff"*, *"get the Reality Checker to verify this"*) or invoke `/jaequery:dda` to assemble a panel automatically.
+Type the slash command, e.g. `/jaequery:shark-tank`, `/jaequery:code-review`, `/jaequery:seo audit https://example.com`. See the [Skill Guides](#skill-guides) below for every skill.
 
-> **Note.** Multi-agent build orchestration, design-variant exploration, and Linear/GitHub/Planbooq backlog burndown previously lived here as `/team-build`, `/team-design`, `/linear-team-build`, etc. Those have been consolidated into a separate plugin: [`jaequery/supabuild`](https://github.com/jaequery/supabuild). Install it alongside this one if you want them.
+> **Pair with [`jaequery/supabuild`](https://github.com/jaequery/supabuild).** Several skills here (`/dda`, `/next-feature`, `/shark-tank`, `/code-review`) dispatch specialist subagents by name — Reality Checker, Code Reviewer, Brand Guardian, Sales Coach, etc. Those agents (161 of them) live in the supabuild plugin along with the multi-agent build / design-variants / Linear-burndown skills. Install both for the full experience:
+>
+> ```
+> /plugin marketplace add jaequery/supabuild
+> /plugin install supabuild@supabuild
+> ```
 
 ### Updating
 
@@ -58,7 +62,7 @@ Fetches the latest skills and agents from this repo.
 
 ## Why this exists
 
-Out-of-the-box Claude is a generalist. Real work needs specialists — someone who thinks like a growth hacker, someone who grades plans like a skeptical VP, someone who kills bad startup ideas before you build them. This repo wires that in as slash commands and subagents you can invoke on demand.
+Out-of-the-box Claude is a generalist. Real work needs codified workflows — a Shark Tank investor panel that grades your project, a tournament that picks your next feature, a Paul Graham–style pressure test before you build the wrong thing, a deep-dive analysis that pits experts against each other. This repo wires that in as slash commands you can invoke on demand. The specialist personas they dispatch live in the companion [supabuild](https://github.com/jaequery/supabuild) plugin.
 
 ---
 
@@ -460,31 +464,11 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 
 ---
 
-## Subagent roster (98)
+## Subagent roster
 
-The `agents/` tree is a curated library of specialist subagents Claude can delegate to via the Agent tool. They're organized by function:
+This plugin ships **skills only**. The 161 specialist subagents the skills dispatch — Reality Checker, Code Reviewer, Brand Guardian, Sales Coach, TikTok Strategist, Backend Architect, etc. — live in the companion [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Install supabuild alongside this one and Claude resolves agent names automatically across both plugins.
 
-| Category | What's inside | Highlights |
-|---|---|---|
-| **product/** | 4 agents | Sprint Prioritizer, Trend Researcher, Feedback Synthesizer, Behavioral Nudge Engine |
-| **project-management/** | 6 agents | Studio Producer, Project Shepherd, Jira Workflow Steward, Senior PM, Experiment Tracker |
-| **marketing/** | 26 agents | Full coverage of US + China: TikTok, Instagram, LinkedIn, Reddit, X, Douyin, Xiaohongshu, WeChat, Weibo, Bilibili, Kuaishou, Zhihu, Baidu SEO, livestream commerce |
-| **paid-media/** | 7 agents | PPC Strategist, Paid Social, Programmatic, Search Query Analyst, Paid Media Auditor, Tracking Specialist, Creative Strategist |
-| **sales/** | 8 agents | Deal Strategist (MEDDPICC), Discovery Coach, Sales Engineer, Pipeline Analyst, Outbound Strategist, Account Strategist, Proposal Strategist |
-| **support/** | 6 agents | Analytics Reporter, Finance Tracker, Legal Compliance Checker, Executive Summary Generator, Infrastructure Maintainer |
-| **game-development/** | 19 agents | Unity, Unreal, Godot, Roblox specialists: shader artists, multiplayer engineers, level designers, technical artists, game designers |
-| **spatial-computing/** | 6 agents | visionOS Spatial Engineer, WebXR Developer, macOS Metal Engineer, XR Interface Architect |
-| **strategy/** | playbooks, runbooks | Coordination patterns, executive briefs, cross-agent workflows |
-| **integrations/** | Adapters | Wiring for Aider, Cursor, Gemini CLI, GitHub Copilot, Windsurf, OpenCode, Antigravity, MCP memory |
-
-> **Moved to the supabuild plugin:** engineering (Backend Architect, SRE, Senior Developer, Code Reviewer, AI Engineer, …), testing (Reality Checker, Evidence Collector, Accessibility Auditor, …), design (UX Architect, UI Designer, Brand Guardian, …), and specialized (Blockchain Security Auditor, MCP Builder, ZK Steward, Agents Orchestrator, …). Install both plugins to get the full roster.
-
-### Why the roster is good
-
-- **Specialists, not generalists.** Each agent has a narrow charter and opinions. No "helpful assistant" filler.
-- **Adversarial voices included.** Reality Checker, Evidence Collector, Code Reviewer, Paid Media Auditor, Compliance Auditor, Model QA — built-in skepticism prevents groupthink when `/dda` assembles a panel.
-- **Global-market coverage.** The marketing roster covers both Western and Chinese platforms at native depth — rare in public agent collections.
-- **Composable.** The Agents Orchestrator and `/dda` are designed to dispatch multiple specialists in parallel and synthesize results, not run them one at a time.
+Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/shark-tank`, `/code-review`) will still run but will fall back to the generic `general-purpose` agent for each role.
 
 ---
 
@@ -492,41 +476,22 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 
 ```
 plugins/jaequery/
-├── skills/                      ← custom slash commands
-│   ├── next-feature/
-│   ├── dda/
-│   ├── code-review/
-│   ├── shark-tank/
-│   ├── git-audit/
-│   ├── seo/
-│   ├── market-research/
-│   ├── marketing-reddit/
-│   ├── cmux-diff/
-│   ├── debug-trace/
-│   └── startup-*/               ← six-skill Paul Graham playbook
-└── agents/                      ← specialist subagent roster
-    ├── product/
-    ├── project-management/
-    ├── marketing/
-    ├── paid-media/
-    ├── sales/
-    ├── support/
-    ├── game-development/
-    ├── spatial-computing/
-    ├── strategy/
-    └── ...
+└── skills/                      ← all 16 slash commands
+    ├── next-feature/
+    ├── dda/
+    ├── code-review/
+    ├── shark-tank/
+    ├── git-audit/
+    ├── seo/
+    ├── market-research/
+    ├── marketing-reddit/
+    ├── cmux-diff/
+    ├── debug-trace/
+    └── startup-*/               ← six-skill Paul Graham playbook
 ```
-
-## Using it
-
-**Skills:** type the slash command (e.g. `/dda`, `/shark-tank`, `/code-review`) in Claude Code. They're auto-discovered after install.
-
-**Agents:** Claude dispatches them via the Agent tool. Invoke implicitly (*"have a security engineer review this"*) or explicitly through `/dda`, which assembles the right panel for you.
 
 ## The pattern
 
-Skills codify *workflows* — the sequence of steps you'd want every time.
-Agents codify *perspectives* — the domain lens a specialist brings.
-`/dda` and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
+Skills codify *workflows* — the sequence of steps you'd want every time. Subagents (in supabuild) codify *perspectives* — the domain lens a specialist brings. `/dda` and `/next-feature` are the bridge: workflows that assemble perspectives on demand and pit them against each other.
 
-That's the whole philosophy of this repo.
+That's the whole philosophy: jaequery owns the workflows, supabuild owns the personas.

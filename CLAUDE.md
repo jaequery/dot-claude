@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is a **Claude Code plugin marketplace**, not an application. It ships one plugin (`jaequery`) that bundles ~16 slash-command skills and ~98 specialist subagents. There is no build, test, or runtime for the marketplace itself — content is consumed by Claude Code when users run `/plugin marketplace add jaequery/dot-claude` and `/plugin install jaequery@jaequery`.
+This is a **Claude Code plugin marketplace**, not an application. It ships one plugin (`jaequery`) that bundles 16 slash-command skills. There is no build, test, or runtime for the marketplace itself — content is consumed by Claude Code when users run `/plugin marketplace add jaequery/dot-claude` and `/plugin install jaequery@jaequery`.
 
-The `engineering`, `design`, `specialized`, and `testing` agent categories were moved to a separate `supabuild` plugin — do not re-add agents in those categories here.
+**This plugin is skill-only.** All specialist subagents (engineering, marketing, sales, game-dev, design, testing, etc. — 161 total) live in the sibling [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Some skills here (`/dda`, `/next-feature`, `/shark-tank`, `/code-review`) dispatch subagents by name via the Agent tool — those names resolve from supabuild when both plugins are installed.
 
-When adding or changing content, you are editing markdown that ends up in end-users' Claude Code installs. Keep the end-user invocation surface in mind (slash commands, Agent-tool `subagent_type`).
+When adding or changing content, you are editing markdown that ends up in end-users' Claude Code installs. Keep the end-user invocation surface in mind (slash commands resolved as `/jaequery:<slug>`).
 
 ## Layout
 
@@ -19,12 +19,9 @@ Two-level structure: the marketplace catalog at the repo root points at a plugin
 plugins/jaequery/
   .claude-plugin/plugin.json               ← plugin manifest
   skills/<skill-name>/SKILL.md             ← slash command definitions (+ optional scripts/references/hooks/)
-  agents/<category>/<agent-name>.md        ← subagent definitions
-  agents/scripts/{lint-agents,convert,install}.sh
-  agents/integrations/<tool>/              ← generated outputs for non-Claude-Code tools
 ```
 
-Agent categories under `plugins/jaequery/agents/`: `game-development`, `marketing`, `paid-media`, `product`, `project-management`, `sales`, `spatial-computing`, `strategy`, `support`, plus `examples/` and `integrations/`. (Engineering / design / specialized / testing live in the supabuild plugin.)
+There is no `agents/` tree in this plugin. If you find yourself wanting to add an agent, add it to the supabuild plugin instead.
 
 ## Authoring contracts
 
@@ -40,41 +37,19 @@ description: >              # used by Claude Code to decide when to invoke; list
 ---
 ```
 
-A skill may include sibling files (`scripts/`, `references/`, `hooks/`, `schema/`, data files). Reference them with relative paths from `SKILL.md`. Skills are free to dispatch subagents via the Agent tool and to invoke other skills.
-
-### Agents (`plugins/jaequery/agents/<category>/<name>.md`)
-
-Required frontmatter (enforced by lint): `name`, `description`, `color`. Optional: `emoji`, `vibe`, `services`. Linter also warns if the body omits "Identity", "Core Mission", or "Critical Rules" sections, or is <50 words.
-
-Filenames are `<category>-<slug>.md` (e.g. `engineering-backend-architect.md`). The frontmatter `name` is human-readable ("Backend Architect"); the Agent-tool `subagent_type` is the plugin-namespaced form (`jaequery:engineering:Backend Architect`).
-
-See `CONTRIBUTING.md` for the full agent template and the persona/operations section grouping that `convert.sh` relies on.
+A skill may include sibling files (`scripts/`, `references/`, `hooks/`, `schema/`, data files). Reference them with relative paths from `SKILL.md` (use `$CLAUDE_PLUGIN_ROOT/skills/<name>/...` for absolute paths inside body text — never hardcode `/Users/...`). Skills are free to dispatch subagents via the Agent tool (they will resolve from supabuild when installed) and to invoke other skills.
 
 ## Commands
 
-Run from `plugins/jaequery/agents/` (scripts resolve paths relative to their own location and the `agents/` root):
-
-```bash
-./scripts/lint-agents.sh                      # lint every agent; errors fail, missing sections warn
-./scripts/lint-agents.sh <file>...            # lint specific files
-
-./scripts/convert.sh                          # regenerate agents/integrations/<tool>/ for all non-Claude-Code tools
-./scripts/convert.sh --tool gemini-cli        # regenerate one tool's output
-
-./scripts/install.sh --tool claude-code       # copy agents into a user's ~/.claude/agents/ (legacy path, predates the plugin marketplace install)
-```
-
-The `convert.sh`/`install.sh` toolchain produces outputs for Aider, Antigravity, Cursor, Gemini CLI, GitHub Copilot, OpenClaw, OpenCode, Windsurf, and others under `agents/integrations/<tool>/`. For Claude Code itself, the plugin marketplace is the distribution path — the `install.sh --tool claude-code` flow is historical.
-
-There is no project-wide test, build, or typecheck. The `/code-review` skill's test runner is a feature of that skill for *other* projects — it doesn't apply to this repo.
+There is no project-wide test, build, lint, or typecheck. The `/code-review` skill's test runner is a feature of that skill for *other* projects — it doesn't apply to this repo.
 
 ## When editing
 
-- **The root `.gitignore` is deny-by-default.** New top-level files won't be tracked unless you add an allowlist entry. The allowlisted tree is: `.claude-plugin/**`, `plugins/jaequery/**`, `.gitignore`, `README.md`, `LICENSE`, `CONTRIBUTING.md`. Skill runtime outputs (`plugins/jaequery/skills/market-research/keyword-research-*.{json,md}`) are explicitly ignored.
-- **After adding/renaming an agent,** run `./scripts/lint-agents.sh` and, if downstream integrations matter, `./scripts/convert.sh` and commit the regenerated `agents/integrations/` files.
+- **The root `.gitignore` is deny-by-default.** New top-level files won't be tracked unless you add an allowlist entry. The allowlisted tree is: `.claude-plugin/**`, `plugins/jaequery/**`, `.gitignore`, `README.md`, `LICENSE`, `CONTRIBUTING.md`, `CLAUDE.md`. Skill runtime outputs (`plugins/jaequery/skills/market-research/keyword-research-*.{json,md}`) are explicitly ignored.
 - **Skill slugs must match their directory name** — Claude Code resolves `/jaequery:<slug>` from the directory, and the frontmatter `name` is how users will type it. Renaming a skill means renaming the directory and the `name:` field together.
-- **Cross-references between skills are common** (`/dda` and `/next-feature` dispatch subagents by name; `/shark-tank` runs an investor panel of subagents). When renaming, grep for the old name across both `skills/` and `agents/`.
-- **Don't add an `emoji`, `version`, or `color` field to examples in Qwen-targeted docs** — Qwen's SubAgent format only uses `name` and `description` (see `CONTRIBUTING.md` "Tool-Specific Compatibility").
+- **Cross-references between skills are common** (`/dda` and `/next-feature` dispatch subagents by name; `/shark-tank` runs an investor panel of subagents). When renaming a skill, grep for the old name across `skills/`. When renaming an agent in supabuild, grep for the old name across this repo's `skills/` too.
+- **Every skill change must bump `plugin.json` `version` and update `README.md` in the same commit** (release-workflow rule).
+- **Use `$CLAUDE_PLUGIN_ROOT`, never `/Users/.../.claude/`** for any path the skill body documents. The marketplace install resolves to a different location per user.
 
 ## Commit style
 

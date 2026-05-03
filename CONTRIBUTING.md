@@ -1,404 +1,109 @@
-# 🤝 Contributing to The Agency
+# 🤝 Contributing
 
-First off, thank you for considering contributing to The Agency! It's people like you who make this collection of AI agents better for everyone.
+Thanks for considering a contribution to `jaequery/dot-claude`. This repo is a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins) shipping the `jaequery` plugin — **skills only** (16 slash commands).
 
-## 📋 Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [How Can I Contribute?](#how-can-i-contribute)
-- [Agent Design Guidelines](#agent-design-guidelines)
-- [Pull Request Process](#pull-request-process)
-- [Style Guide](#style-guide)
-- [Community](#community)
+> **Looking to contribute an agent?** All specialist subagents (engineering, design, marketing, sales, etc.) live in the sibling [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Open agent PRs there.
 
 ---
 
 ## 📜 Code of Conduct
 
-This project and everyone participating in it is governed by our Code of Conduct. By participating, you are expected to uphold this code:
-
-- **Be Respectful**: Treat everyone with respect. Healthy debate is encouraged, but personal attacks are not tolerated.
-- **Be Inclusive**: Welcome and support people of all backgrounds and identities.
-- **Be Collaborative**: What we create together is better than what we create alone.
-- **Be Professional**: Keep discussions focused on improving the agents and the community.
+- **Be respectful**: healthy debate is encouraged, personal attacks are not.
+- **Be inclusive**: welcome people of all backgrounds.
+- **Be collaborative**: assume good intent.
+- **Be professional**: keep discussions focused on improving the plugin.
 
 ---
 
-## 🎯 How Can I Contribute?
+## 🎯 How to Contribute
 
-### 1. Create a New Agent
+### 1. Add a New Skill
 
-Have an idea for a specialized agent? Great! Here's how to add one:
+A skill is a `SKILL.md` file in its own directory under `plugins/jaequery/skills/`. The directory name *is* the slash command (`/jaequery:<dirname>`).
 
-1. **Fork the repository**
-2. **Choose the appropriate category** (or propose a new one):
-   - `marketing/` - Growth and marketing specialists
-   - `paid-media/` - PPC, search/social ad, and tracking specialists
-   - `product/` - Product management specialists
-   - `project-management/` - PM and coordination specialists
-   - `sales/` - Pre-sale, deal-strategy, and account specialists
-   - `support/` - Operations and support specialists
-   - `game-development/` - Engine specialists (Unity, Unreal, Godot, Roblox)
-   - `spatial-computing/` - AR/VR/XR specialists
-   - `strategy/` - Cross-functional strategy and orchestration
+1. **Fork the repo.**
+2. **Create `plugins/jaequery/skills/<your-slug>/SKILL.md`** with this minimum frontmatter:
 
-   > Note: `engineering/`, `design/`, `testing/`, and `specialized/` agents live in the sibling [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Add agents in those domains there.
+   ```yaml
+   ---
+   name: <your-slug>          # MUST match the directory name
+   description: >             # used by Claude Code to decide when to invoke;
+     What it does. Use when user says "/<your-slug>", "<phrase 1>", "<phrase 2>".
+   ---
+   ```
 
-3. **Create your agent file** following the template below
-4. **Test your agent** in real scenarios
-5. **Submit a Pull Request** with your agent
+   Below the frontmatter, write the SOP — clear steps Claude follows when invoked. Be specific. List inputs, outputs, and edge cases.
 
-### 2. Improve Existing Agents
+3. **(Optional) Add sibling files.** Skills can include `scripts/`, `references/`, `hooks/`, `schema/`, etc. Reference them with relative paths from `SKILL.md`. For absolute paths inside the body, use `$CLAUDE_PLUGIN_ROOT/skills/<your-slug>/...` — never hardcode `/Users/...`.
 
-Found a way to make an agent better? Contributions welcome:
+4. **Bump `plugins/jaequery/.claude-plugin/plugin.json` `version`** and **update `README.md`** in the same commit (release-workflow rule).
 
-- Add real-world examples and use cases
-- Enhance code samples with modern patterns
-- Update workflows based on new best practices
-- Add success metrics and benchmarks
-- Fix typos, improve clarity, enhance documentation
+5. **Submit a PR** with:
+   - A clear description of what the skill does
+   - Why it's useful (real use case)
+   - Any testing or iteration you've done
 
-### 3. Share Success Stories
+### 2. Improve an Existing Skill
 
-Used these agents successfully? Share your story:
+Found a sharper trigger phrase? A better SOP step? A bug in a script? Open a PR. Same version-bump-and-README rule applies — every skill change touches `plugin.json` and `README.md`.
 
-- Post in [GitHub Discussions](https://github.com/msitarzewski/agency-agents/discussions)
-- Add a case study to the README
-- Write a blog post and link it
-- Create a video tutorial
+### 3. Report Issues
 
-### 4. Report Issues
-
-Found a problem? Let us know:
-
-- Check if the issue already exists
-- Provide clear reproduction steps
-- Include context about your use case
-- Suggest potential solutions if you have ideas
+- Search existing issues first.
+- Provide reproduction steps and the slash command you ran.
+- Mention your Claude Code version (`claude --version`).
 
 ---
 
-## 🎨 Agent Design Guidelines
+## 🎨 Skill Design Guidelines
 
-### Agent File Structure
+**Great skills are:**
 
-Every agent should follow this structure:
+- ✅ **Narrow.** One workflow, done well. Not "do everything for X domain."
+- ✅ **Triggerable.** The `description:` field lists the exact phrases that should fire it. Claude routes on this — be explicit.
+- ✅ **Stateless or boundaryless.** A skill should work fine in any project. If it needs project state, document it clearly.
+- ✅ **Honest about deps.** If a skill needs an MCP server, an external CLI (`gh`, `linear`, etc.), or another plugin (e.g. `supabuild` for agent dispatch), say so up front.
 
-```markdown
----
-name: Agent Name
-description: One-line description of the agent's specialty and focus
-color: colorname or "#hexcode"
-emoji: 🎯
-vibe: One-line personality hook — what makes this agent memorable
-services:                              # optional — only if the agent requires external services
-  - name: Service Name
-    url: https://service-url.com
-    tier: free                         # free, freemium, or paid
----
+**Avoid:**
 
-# Agent Name
-
-## 🧠 Your Identity & Memory
-- **Role**: Clear role description
-- **Personality**: Personality traits and communication style
-- **Memory**: What the agent remembers and learns
-- **Experience**: Domain expertise and perspective
-
-## 🎯 Your Core Mission
-- Primary responsibility 1 with clear deliverables
-- Primary responsibility 2 with clear deliverables
-- Primary responsibility 3 with clear deliverables
-- **Default requirement**: Always-on best practices
-
-## 🚨 Critical Rules You Must Follow
-Domain-specific rules and constraints that define the agent's approach
-
-## 📋 Your Technical Deliverables
-Concrete examples of what the agent produces:
-- Code samples
-- Templates
-- Frameworks
-- Documents
-
-## 🔄 Your Workflow Process
-Step-by-step process the agent follows:
-1. Phase 1: Discovery and research
-2. Phase 2: Planning and strategy
-3. Phase 3: Execution and implementation
-4. Phase 4: Review and optimization
-
-## 💭 Your Communication Style
-- How the agent communicates
-- Example phrases and patterns
-- Tone and approach
-
-## 🔄 Learning & Memory
-What the agent learns from:
-- Successful patterns
-- Failed approaches
-- User feedback
-- Domain evolution
-
-## 🎯 Your Success Metrics
-Measurable outcomes:
-- Quantitative metrics (with numbers)
-- Qualitative indicators
-- Performance benchmarks
-
-## 🚀 Advanced Capabilities
-Advanced techniques and approaches the agent masters
-```
-
-### Agent Structure
-
-Agent files are organized into two semantic groups that map to
-OpenClaw's workspace format and help other tools parse your agent:
-
-#### Persona (who the agent is)
-- **Identity & Memory** — role, personality, background
-- **Communication Style** — tone, voice, approach
-- **Critical Rules** — boundaries and constraints
-
-#### Operations (what the agent does)
-- **Core Mission** — primary responsibilities
-- **Technical Deliverables** — concrete outputs and templates
-- **Workflow Process** — step-by-step methodology
-- **Success Metrics** — measurable outcomes
-- **Advanced Capabilities** — specialized techniques
-
-No special formatting is required — just keep persona-related sections
-(identity, communication, rules) grouped separately from operational
-sections (mission, deliverables, workflow, metrics). The `convert.sh`
-script uses these section headers to automatically split agents into
-tool-specific formats.
-
-### Agent Design Principles
-
-1. **🎭 Strong Personality**
-   - Give the agent a distinct voice and character
-   - Not "I am a helpful assistant" - be specific and memorable
-   - Example: "I default to finding 3-5 issues and require visual proof" (Evidence Collector)
-
-2. **📋 Clear Deliverables**
-   - Provide concrete code examples
-   - Include templates and frameworks
-   - Show real outputs, not vague descriptions
-
-3. **✅ Success Metrics**
-   - Include specific, measurable metrics
-   - Example: "Page load times under 3 seconds on 3G"
-   - Example: "10,000+ combined karma across accounts"
-
-4. **🔄 Proven Workflows**
-   - Step-by-step processes
-   - Real-world tested approaches
-   - Not theoretical - battle-tested
-
-5. **💡 Learning Memory**
-   - What patterns the agent recognizes
-   - How it improves over time
-   - What it remembers between sessions
-
-### External Services
-
-Agents may depend on external services (APIs, platforms, SaaS tools) when
-those services are essential to the agent's function. When they do:
-
-1. **Declare dependencies** in frontmatter using the `services` field
-2. **The agent must stand on its own** — strip the API calls and there
-   should still be a useful persona, workflow, and expertise underneath
-3. **Don't duplicate vendor docs** — reference them, don't reproduce them.
-   The agent file should read like an agent, not a getting-started guide
-4. **Prefer services with free tiers** so contributors can test the agent
-
-The test: *is this agent for the user, or for the vendor?* An agent that
-solves the user's problem using a service belongs here. A service's
-quickstart guide wearing an agent costume does not.
-
-### Tool-Specific Compatibility
-
-**Qwen Code Compatibility**: Agent bodies support `${variable}` templating for dynamic context (e.g., `${project_name}`, `${task_description}`). Qwen SubAgents use minimal frontmatter: only `name` and `description` are required; `color`, `emoji`, and `version` fields are omitted as Qwen doesn't use them.
-
-### What Makes a Great Agent?
-
-**Great agents have**:
-- ✅ Narrow, deep specialization
-- ✅ Distinct personality and voice
-- ✅ Concrete code/template examples
-- ✅ Measurable success metrics
-- ✅ Step-by-step workflows
-- ✅ Real-world testing and iteration
-
-**Avoid**:
-- ❌ Generic "helpful assistant" personality
-- ❌ Vague "I will help you with..." descriptions
-- ❌ No code examples or deliverables
-- ❌ Overly broad scope (jack of all trades)
-- ❌ Untested theoretical approaches
+- ❌ Vague descriptions ("helps you with marketing"). Claude won't know when to invoke.
+- ❌ Hardcoded paths (`/Users/jaelee/...`). Use `$CLAUDE_PLUGIN_ROOT`.
+- ❌ Skills that silently invoke the network without telling the user.
+- ❌ Embedding huge reference content directly in `SKILL.md`. Put long content in `references/*.md` and load on demand.
 
 ---
 
 ## 🔄 Pull Request Process
 
-### Before Submitting
+1. **Fork** and **branch**: `git checkout -b add-skill-<name>`
+2. **Verify your changes locally** — install the plugin from your fork (`/plugin marketplace add <your-fork>`) and exercise the skill in a real Claude Code session.
+3. **Bump version** in `plugins/jaequery/.claude-plugin/plugin.json` and **update `README.md`** in the same commit.
+4. **Open the PR** with a short imperative title (e.g., `Add /worktree-task skill — isolated worktree task runner`). No conventional-commit prefixes.
 
-1. **Test Your Agent**: Use it in real scenarios, iterate on feedback
-2. **Follow the Template**: Match the structure of existing agents
-3. **Add Examples**: Include at least 2-3 code/template examples
-4. **Define Metrics**: Include specific, measurable success criteria
-5. **Proofread**: Check for typos, formatting issues, clarity
+Maintainers will review, possibly request changes, and merge.
 
-### Submitting Your PR
+---
 
-1. **Fork** the repository
-2. **Create a branch**: `git checkout -b add-agent-name`
-3. **Make your changes**: Add your agent file(s)
-4. **Commit**: `git commit -m "Add [Agent Name] specialist"`
-5. **Push**: `git push origin add-agent-name`
-6. **Open a Pull Request** with:
-   - Clear title: "Add [Agent Name] - [Category]"
-   - Description of what the agent does
-   - Why this agent is needed (use case)
-   - Any testing you've done
+## 📁 Layout Reference
 
-### PR Review Process
-
-1. **Community Review**: Other contributors may provide feedback
-2. **Iteration**: Address feedback and make improvements
-3. **Approval**: Maintainers will approve when ready
-4. **Merge**: Your contribution becomes part of The Agency!
-
-### PR Template
-
-```markdown
-## Agent Information
-**Agent Name**: [Name]
-**Category**: [marketing/sales/product/etc.]
-**Specialty**: [One-line description]
-
-## Motivation
-[Why is this agent needed? What gap does it fill?]
-
-## Testing
-[How have you tested this agent? Real-world use cases?]
-
-## Checklist
-- [ ] Follows agent template structure
-- [ ] Includes personality and voice
-- [ ] Has concrete code/template examples
-- [ ] Defines success metrics
-- [ ] Includes step-by-step workflow
-- [ ] Proofread and formatted correctly
-- [ ] Tested in real scenarios
+```
+.claude-plugin/marketplace.json            ← marketplace catalog (do not move)
+plugins/jaequery/
+  .claude-plugin/plugin.json               ← plugin manifest
+  skills/<skill-name>/SKILL.md             ← your contribution lives here
+README.md
+CLAUDE.md                                  ← guidance for Claude Code itself
+CONTRIBUTING.md                            ← this file
+LICENSE
+.gitignore                                 ← deny-by-default; allowlist additions explicitly
 ```
 
----
-
-## 📐 Style Guide
-
-### Writing Style
-
-- **Be specific**: "Reduce page load by 60%" not "Make it faster"
-- **Be concrete**: "Create React components with TypeScript" not "Build UIs"
-- **Be memorable**: Give agents personality, not generic corporate speak
-- **Be practical**: Include real code, not pseudo-code
-
-### Formatting
-
-- Use **Markdown formatting** consistently
-- Include **emojis** for section headers (makes scanning easier)
-- Use **code blocks** for all code examples with proper syntax highlighting
-- Use **tables** for comparing options or showing metrics
-- Use **bold** for emphasis, `code` for technical terms
-
-### Code Examples
-
-```markdown
-## Example Code Block
-
-\`\`\`typescript
-// Always include:
-// 1. Language specification for syntax highlighting
-// 2. Comments explaining key concepts
-// 3. Real, runnable code (not pseudo-code)
-// 4. Modern best practices
-
-interface AgentExample {
-  name: string;
-  specialty: string;
-  deliverables: string[];
-}
-\`\`\`
-```
-
-### Tone
-
-- **Professional but approachable**: Not overly formal or casual
-- **Confident but not arrogant**: "Here's the best approach" not "Maybe you could try..."
-- **Helpful but not hand-holding**: Assume competence, provide depth
-- **Personality-driven**: Each agent should have a unique voice
+The root `.gitignore` is deny-by-default. If you add a top-level file or a new tracked path under `plugins/jaequery/`, make sure it falls inside the allowlisted tree (`.claude-plugin/**`, `plugins/jaequery/**`, plus the named root files).
 
 ---
 
-## 🌟 Recognition
+## 🎉 Thank You
 
-Contributors who make significant contributions will be:
+Your contributions make this plugin sharper for everyone.
 
-- Listed in the README acknowledgments section
-- Highlighted in release notes
-- Featured in "Agent of the Week" showcases (if applicable)
-- Given credit in the agent file itself
-
----
-
-## 🤔 Questions?
-
-- **General Questions**: [GitHub Discussions](https://github.com/msitarzewski/agency-agents/discussions)
-- **Bug Reports**: [GitHub Issues](https://github.com/msitarzewski/agency-agents/issues)
-- **Feature Requests**: [GitHub Issues](https://github.com/msitarzewski/agency-agents/issues)
-- **Community Chat**: [Join our discussions](https://github.com/msitarzewski/agency-agents/discussions)
-
----
-
-## 📚 Resources
-
-### For New Contributors
-
-- [README.md](README.md) - Overview and agent catalog
-- [Example: Content Creator](plugins/jaequery/agents/marketing/marketing-content-creator.md) - Well-structured agent example
-- [Example: Reddit Community Builder](plugins/jaequery/agents/marketing/marketing-reddit-community-builder.md) - Great personality example
-- [Example: Analytics Reporter](plugins/jaequery/agents/support/support-analytics-reporter.md) - Reporting specialist example
-
-### For Agent Design
-
-- Read existing agents for inspiration
-- Study the patterns that work well
-- Test your agents in real scenarios
-- Iterate based on feedback
-
----
-
-## 🎉 Thank You!
-
-Your contributions make The Agency better for everyone. Whether you're:
-
-- Adding a new agent
-- Improving documentation
-- Fixing bugs
-- Sharing success stories
-- Helping other contributors
-
-**You're making a difference. Thank you!**
-
----
-
-<div align="center">
-
-**Questions? Ideas? Feedback?**
-
-[Open an Issue](https://github.com/msitarzewski/agency-agents/issues) • [Start a Discussion](https://github.com/msitarzewski/agency-agents/discussions) • [Submit a PR](https://github.com/msitarzewski/agency-agents/pulls)
-
-Made with ❤️ by the community
-
-</div>
+[Open an Issue](https://github.com/jaequery/dot-claude/issues) • [Submit a PR](https://github.com/jaequery/dot-claude/pulls)
