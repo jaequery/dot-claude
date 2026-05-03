@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is a **Claude Code plugin marketplace**, not an application. It ships one plugin (`jaequery`) that bundles ~17 slash-command skills and ~167 specialist subagents. There is no build, test, or runtime for the marketplace itself — content is consumed by Claude Code when users run `/plugin marketplace add jaequery/dot-claude` and `/plugin install jaequery@jaequery`.
+This is a **Claude Code plugin marketplace**, not an application. It ships one plugin (`jaequery`) that bundles ~16 slash-command skills and ~98 specialist subagents. There is no build, test, or runtime for the marketplace itself — content is consumed by Claude Code when users run `/plugin marketplace add jaequery/dot-claude` and `/plugin install jaequery@jaequery`.
+
+The `engineering`, `design`, `specialized`, and `testing` agent categories were moved to a separate `supabuild` plugin — do not re-add agents in those categories here.
 
 When adding or changing content, you are editing markdown that ends up in end-users' Claude Code installs. Keep the end-user invocation surface in mind (slash commands, Agent-tool `subagent_type`).
 
@@ -22,7 +24,7 @@ plugins/jaequery/
   agents/integrations/<tool>/              ← generated outputs for non-Claude-Code tools
 ```
 
-Agent categories under `plugins/jaequery/agents/`: `design`, `engineering`, `game-development`, `marketing`, `paid-media`, `product`, `project-management`, `sales`, `spatial-computing`, `specialized`, `strategy`, `support`, `testing`, plus `examples/` and `integrations/`.
+Agent categories under `plugins/jaequery/agents/`: `game-development`, `marketing`, `paid-media`, `product`, `project-management`, `sales`, `spatial-computing`, `strategy`, `support`, plus `examples/` and `integrations/`. (Engineering / design / specialized / testing live in the supabuild plugin.)
 
 ## Authoring contracts
 

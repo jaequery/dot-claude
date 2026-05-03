@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — custom slash-command skills and a curated roster of 140+ specialist subagents, published as a single **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated team of domain experts.
+My personal Claude Code arsenal — custom slash-command skills and a curated roster of 90+ specialist subagents, published as a single **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated team of domain experts. Engineering, design, specialized, and testing agents, plus the multi-agent build / design-variants / Linear-burndown skills, now ship in the companion **supabuild** plugin.
 
 ## Install
 
@@ -460,15 +460,12 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 
 ---
 
-## Subagent roster (140+)
+## Subagent roster (90+)
 
 The `agents/` tree is a curated library of specialist subagents Claude can delegate to via the Agent tool. They're organized by function:
 
 | Category | What's inside | Highlights |
 |---|---|---|
-| **engineering/** | 23 agents | Backend Architect, Security Engineer, SRE, Senior Developer, Code Reviewer, AI Engineer, Database Optimizer, Solidity Engineer, Threat Detection Engineer |
-| **testing/** | 8 agents | Reality Checker, Evidence Collector, Accessibility Auditor, Performance Benchmarker, API Tester — the "prove it works" squad |
-| **design/** | 8 agents | UX Architect, UI Designer, Brand Guardian, Whimsy Injector, Visual Storyteller, UX Researcher |
 | **product/** | 4 agents | Sprint Prioritizer, Trend Researcher, Feedback Synthesizer, Behavioral Nudge Engine |
 | **project-management/** | 6 agents | Studio Producer, Project Shepherd, Jira Workflow Steward, Senior PM, Experiment Tracker |
 | **marketing/** | 26 agents | Full coverage of US + China: TikTok, Instagram, LinkedIn, Reddit, X, Douyin, Xiaohongshu, WeChat, Weibo, Bilibili, Kuaishou, Zhihu, Baidu SEO, livestream commerce |
@@ -477,9 +474,10 @@ The `agents/` tree is a curated library of specialist subagents Claude can deleg
 | **support/** | 6 agents | Analytics Reporter, Finance Tracker, Legal Compliance Checker, Executive Summary Generator, Infrastructure Maintainer |
 | **game-development/** | Unity, Unreal, Godot, Roblox | Engine-specific specialists: shader artists, multiplayer engineers, level designers, technical artists |
 | **spatial-computing/** | 6 agents | visionOS Spatial Engineer, WebXR Developer, macOS Metal Engineer, XR Interface Architect |
-| **specialized/** | 23 agents | Blockchain Security Auditor, Compliance Auditor, MCP Builder, ZK Steward, Model QA, Agents Orchestrator, Document Generator, Identity Graph Operator |
 | **strategy/** | playbooks, runbooks | Coordination patterns, executive briefs, cross-agent workflows |
 | **integrations/** | Adapters | Wiring for Aider, Cursor, Gemini CLI, GitHub Copilot, Windsurf, OpenCode, Antigravity, MCP memory |
+
+> **Moved to the supabuild plugin:** engineering (Backend Architect, SRE, Senior Developer, Code Reviewer, AI Engineer, …), testing (Reality Checker, Evidence Collector, Accessibility Auditor, …), design (UX Architect, UI Designer, Brand Guardian, …), and specialized (Blockchain Security Auditor, MCP Builder, ZK Steward, Agents Orchestrator, …). Install both plugins to get the full roster.
 
 ### Why the roster is good
 
@@ -507,16 +505,15 @@ plugins/jaequery/
 │   ├── debug-trace/
 │   └── startup-*/               ← six-skill Paul Graham playbook
 └── agents/                      ← specialist subagent roster
-    ├── engineering/
-    ├── testing/
-    ├── design/
     ├── product/
+    ├── project-management/
     ├── marketing/
     ├── paid-media/
     ├── sales/
+    ├── support/
     ├── game-development/
     ├── spatial-computing/
-    ├── specialized/
+    ├── strategy/
     └── ...
 ```
 
