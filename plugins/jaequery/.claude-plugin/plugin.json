@@ -1,7 +1,7 @@
 {
   "name": "jaequery",
-  "version": "1.11.0",
-  "description": "Jae Lee's curated arsenal of 16 slash-command skills: Paul Graham startup playbook (validate-problem, find-customers, build-mvp, growth-strategy, map-competition, pressure-test-idea), Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, cmux diff viewer, and Cursor-style runtime debug-trace. All 161 specialist subagents (engineering, design, marketing, sales, etc.) and the multi-agent build / design-variants / Linear + GitHub + Planbooq backlog burndown skills now live in the standalone supabuild plugin.",
+  "version": "1.12.0",
+  "description": "Jae Lee's curated arsenal of 17 slash-command skills: Paul Graham startup playbook (validate-problem, find-customers, build-mvp, growth-strategy, map-competition, pressure-test-idea), Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, code-level audit, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, cmux diff viewer, and Cursor-style runtime debug-trace. All 161 specialist subagents (engineering, design, marketing, sales, etc.) and the multi-agent build / design-variants / Linear + GitHub + Planbooq backlog burndown skills now live in the standalone supabuild plugin.",
   "author": {
     "name": "Jae Lee",
     "url": "https://github.com/jaequery"
@@ -19,6 +19,7 @@
     "paul-graham",
     "shark-tank",
     "git-audit",
+    "code-audit",
     "deep-dive-analysis",
     "market-research",
     "debug-trace"

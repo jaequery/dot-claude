@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — 16 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
+My personal Claude Code arsenal — 17 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -75,6 +75,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/next-feature`](#next-feature) — Pick the single best next feature to ship (tournament-judged).
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
+- [`/code-audit`](#code-audit) — 14-way code-level quality audit (organization, complexity, redundancy, security, performance).
 - [`/shark-tank`](#shark-tank) — Evaluate the current project as a Shark Tank episode.
 - [`/git-audit`](#git-audit) — 13-way repo health and team-dynamics audit.
 
@@ -167,6 +168,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Resolves PR #247 via `gh pr`, runs the repo's own test + lint + typecheck, and returns a **REQUEST-CHANGES** verdict citing a SQL injection at `api/search.ts:84` and a missing index flagged as `[needs-verification]`.*
+
+---
+
+### `/code-audit`
+
+**What it does.** Dashboard-style audit of a codebase at the code level — organization, complexity, redundancy, security, performance, design, dependency hygiene, and test coverage. Complements `/code-review` (diff-level, evidence-gated) and `/git-audit` (history-level).
+
+**When to use.** You want a high-level signal read on code quality across the whole tree, not a focused diff review.
+
+**How to invoke.** `/code-audit [path]`, or *"audit this code"*, *"code quality audit"*, *"codebase quality"*. Defaults to cwd.
+
+**What you get.** Sectioned report covering footprint, file/function size outliers, duplication, debt markers, complexity, security smells, error handling, performance smells, dependency hygiene, test ratio, coupling/import hotspots, and naming hygiene → summary dashboard table (OK / WARN / CONCERN) → top findings with `path:line` → 3–5 prioritized recommendations.
+
+**How it works.** Runs ~14 static analyses (grep / awk / wc patterns plus opportunistic `npm outdated` / `pip list --outdated` / `go list -m -u all`) over `git ls-files`, applies fixed thresholds (e.g. file >1000 LOC = CONCERN, test/source ratio <10% = CONCERN, any genuine secret hit = CONCERN). Read-only — never edits code.
+
+**Example.**
+
+```
+/code-audit
+```
+
+*Surfaces `src/api/handlers.ts` at 1,243 LOC (CONCERN), 187 TODO/FIXME markers (CONCERN), 6 `await`-in-loop patterns, an empty `catch` in `src/payments/charge.ts:84`, and a 7% test/source ratio — verdict: refactor handlers, raise test floor before next feature.*
 
 ---
 
@@ -476,10 +499,11 @@ Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/
 
 ```
 plugins/jaequery/
-└── skills/                      ← all 16 slash commands
+└── skills/                      ← all 17 slash commands
     ├── next-feature/
     ├── dda/
     ├── code-review/
+    ├── code-audit/
     ├── shark-tank/
     ├── git-audit/
     ├── seo/
