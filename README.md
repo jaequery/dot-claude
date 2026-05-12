@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — 19 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, `/market` competitor + voice-of-customer pass, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
+My personal Claude Code arsenal — 20 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, `/market` competitor + voice-of-customer pass, Reddit marketing, runtime debug-trace, `/finish` for shipping stuck 90%-done projects, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -79,6 +79,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/taste`](#taste) — Opinionated design and product taste critique. Names generic AI-design tells; references taste-makers by name.
 - [`/shark-tank`](#shark-tank) — Evaluate the current project as a Shark Tank episode.
 - [`/git-audit`](#git-audit) — 13-way repo health and team-dynamics audit.
+- [`/finish`](#finish) — Ship a stuck "90% done" side project. Names the avoidance pattern, cuts scope, picks a launch date, drafts the announcement.
 
 ### Startup playbooks (Paul Graham framework)
 
@@ -258,6 +259,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Surfaces that one dev owns 72% of `src/billing/*` (CONCERN), test ratio dropped to 6% last quarter (CONCERN), three files haven't been touched in 14 months, and Friday-night deploys correlate with bug fix commits.*
+
+---
+
+### `/finish`
+
+**What it does.** Pushes a stuck "90% done" side project across the finish line. Audits the actual state of the repo, names the *avoidance pattern* keeping it stalled (by name, like `/taste` does for generic design tells), brutally cuts scope to a minimum viable launch, walks a non-skippable "boring 10%" checklist, picks a launch date (not asks — picks), builds a day-by-day ship plan, and drafts the Day-1 launch post.
+
+**When to use.** You have a project that's been "almost done" for weeks or months. The fun part is built; the unglamorous part (deploy, domain, landing copy, payment, signup, legal) isn't started. You can't tell whether it's procrastination, perfectionism, or scope creep — and you need someone to call it.
+
+**How to invoke.** `/finish` from inside the stalled project, or *"help me finish this project"*, *"ship this"*, *"launch this"*, *"I can't finish"*, *"stuck at 90%"*, *"this project has been sitting forever"*. If you mention multiple stalled projects, picks one and ignores the others — trying to ship five at once is how zero ship.
+
+**What you get.** Reality Check (what's actually built vs. what the user thinks) → **The Avoidance Pattern** — named (Boring 10% Avoidance, Perfectionism on a Pre-User Product, Scope-Creep-as-Procrastination, The Soft Launch Trap, Refactor-Before-Launch, Building the Tool to Build the Tool, Fear-of-Judgment-as-Polish, Domain-Bought–Nothing-Deployed, etc.) with evidence from your commits and TODOs → Minimum Viable Launch definition + "what gets cut" → Boring 10% status table (deploy, domain, HTTPS, signup, payment, privacy policy, launch post, friends list, analytics) → **Launch Date** (picked, not asked — usually 7 days out, 14 if genuinely needed) → day-by-day Ship Plan → **drafted launch post** (Show HN / Product Hunt / r/X / tweet — real text, not "write a launch post") → The One Thing for today → Day +1 plan.
+
+**How it works.** Scans `README`, `git log`, last commit date, `git shortlog`, manifest, top-level dirs, TODO/FIXME markers, deployed URL, signup/payment routes, legal pages, and CI config. Diagnoses the avoidance pattern from a named catalog rather than handing back a generic checklist. Refuses "but I need —" objections in advance by pre-empting them in the scope cut. Drafts the actual launch announcement instead of asking the user to write it — half the avoidance is staring at a blank text box.
+
+**Example.**
+
+```
+/finish
+```
+
+*Run inside a 4-month-old side project. Diagnosis: **Boring 10% Avoidance** — the dashboard component has been refactored twice this month, but `/signup` 500s because `STRIPE_SECRET_KEY` isn't in Vercel and there's no privacy policy. Launch date: **Tuesday, May 19**. The One Thing today: get signup → confirmation email → first-run screen working end-to-end. Drafts a 4-sentence Show HN post ready to publish on launch morning.*
 
 ---
 
@@ -545,7 +568,7 @@ Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/
 
 ```
 plugins/jaequery/
-└── skills/                      ← all 19 slash commands
+└── skills/                      ← all 20 slash commands
     ├── next-feature/
     ├── dda/
     ├── code-review/
