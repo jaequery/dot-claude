@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — 18 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
+My personal Claude Code arsenal — 19 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, `/market` competitor + voice-of-customer pass, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -95,6 +95,7 @@ A sequenced, zero-to-one operating system:
 
 - [`/seo`](#seo) — Full SEO suite (audit, page, schema, GEO, plan).
 - [`/market-research`](#market-research) — Keyword opportunities from real demand signals.
+- [`/market`](#market) — Two-stage market intelligence: 5–7 competitor table + Reddit voice-of-customer.
 - [`/marketing-reddit`](#marketing-reddit) — Find Reddit posts, leave comments, create threads.
 
 ### Utilities
@@ -444,6 +445,28 @@ market research --only "home espresso machine, pour over coffee setup"
 
 ---
 
+### `/market`
+
+**What it does.** Two-stage market intelligence pass for a product idea: a grounded 5–7 row competitor table (Direct / Indirect / Substitute) plus a Reddit voice-of-customer mine that surfaces real pain, demand signals, and the exact words customers use.
+
+**When to use.** Before building or repositioning, when you need to understand the *space* — who else is in it, what the current behavior is, and what customers actually complain about and ask for. Distinct from `/market-research` (keyword scraper) and `/marketing-reddit` (Reddit posting).
+
+**How to invoke.** `/market`, or `/market <one-line product description>`, or *"competitor map"*, *"competitive landscape"*, *"voice of customer"*, *"reddit sentiment"*, *"customer language"*, *"market intelligence"*. Asks for `[target audience] + [problem or goal] + [product or approach]` if missing.
+
+**What you get.** One-line restatement of the product → **Stage 1** markdown table (5–7 rows × Competitor / Type / Key Offering / Strengths / Weaknesses / How We're Different — with a mandatory Substitute row for current behavior) → **Stage 2** Reddit synthesis from 3–5 specific subreddits: top pain points with verbatim quotes + permalinks, explicit demand signals, an 8–15 phrase customer language glossary (split into pain terms vs. outcome terms), current alternatives & complaints, and a sentiment summary → final **Market Read** (crowdedness verdict, most underserved pain, landing-page phrase candidate, wedge competitor, biggest red flag, one concrete next move).
+
+**How it works.** Stage 1 uses WebSearch + WebFetch to verify competitors exist before listing them — no fabricated companies. Stage 2 hits Reddit's public JSON API via `curl` (top.json + search.json + comments.json) for real posts and quotes, with WebSearch fallback if blocked. Hard rules: no fabricated quotes, every quote has a permalink, the Substitute row is mandatory (current behavior is always a competitor), and "we have AI" is never accepted as differentiation.
+
+**Example.**
+
+```
+/market I'm building a SOAP-note tool for solo therapists that drafts notes from session audio
+```
+
+*Stage 1 surfaces Mentalyc, Upheal, and SimplePractice's built-in notes as Direct, a generic AI scribe used off-label as Indirect, and "therapists writing by hand during sessions" as the mandatory Substitute. Stage 2 mines r/therapists and r/psychotherapy, pulls 6 verbatim complaints about Mentalyc missing EMDR session structure (with permalinks), and surfaces the phrase "I want my evenings back" as the landing-page candidate. Market Read: **Emerging**, wedge is insurance-coded note formats.*
+
+---
+
 ### `/marketing-reddit`
 
 **What it does.** Finds relevant Reddit posts, comments on them, or creates new threads — human-sounding and channel-tailored.
@@ -522,7 +545,7 @@ Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/
 
 ```
 plugins/jaequery/
-└── skills/                      ← all 18 slash commands
+└── skills/                      ← all 19 slash commands
     ├── next-feature/
     ├── dda/
     ├── code-review/
