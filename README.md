@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — 17 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
+My personal Claude Code arsenal — 18 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, Reddit marketing, runtime debug-trace, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -76,6 +76,7 @@ Invoke any of these from the Claude Code prompt. Each one is a self-contained SO
 - [`/dda`](#dda--deep-dive-analysis) — Deep Dive Analysis: expert panel scores a plan 0–10, separate Master Brain subagent issues a verdict.
 - [`/code-review`](#code-review) — Evidence-gated review across Simple / Performant / Clean / Secure / Testable.
 - [`/code-audit`](#code-audit) — 14-way code-level quality audit (organization, complexity, redundancy, security, performance).
+- [`/taste`](#taste) — Opinionated design and product taste critique. Names generic AI-design tells; references taste-makers by name.
 - [`/shark-tank`](#shark-tank) — Evaluate the current project as a Shark Tank episode.
 - [`/git-audit`](#git-audit) — 13-way repo health and team-dynamics audit.
 
@@ -190,6 +191,28 @@ A sequenced, zero-to-one operating system:
 ```
 
 *Surfaces `src/api/handlers.ts` at 1,243 LOC (CONCERN), 187 TODO/FIXME markers (CONCERN), 6 `await`-in-loop patterns, an empty `catch` in `src/payments/charge.ts:84`, and a 7% test/source ratio — verdict: refactor handlers, raise test floor before next feature.*
+
+---
+
+### `/taste`
+
+**What it does.** Opinionated design and product taste critique. Judges a URL, screenshot, codebase, pasted UI code, or product decision against a high bar set by Linear, Stripe, Things, Arc, Raycast, Superhuman, Mercury, and Apple — and calls out generic AI-design tells by name.
+
+**When to use.** You want a decisive read on whether something is tasteful or generic — not a balanced rubric, not committee feedback. Pair with `/shark-tank` (investor lens) and `/code-review` (engineering lens) for a full read.
+
+**How to invoke.** `/taste [target]`, or *"is this tasteful"*, *"is this generic"*, *"make it less generic"*, *"elevate this"*, *"what would Linear do"*, *"give me taste feedback"*. Target can be a URL, a screenshot path, pasted UI code, a product decision in plain English, or no target (defaults to the current project).
+
+**What you get.** A one-line verdict (TASTEFUL / COMPETENT / GENERIC / HOSTILE / CONFUSED) → The Tells (specific observations with evidence, anti-patterns named) → The Cuts (what to remove — subtraction first) → The Steals (real products that solved this well, by name and by specific decision) → The Lift (3–5 concrete changes ranked by impact) → The One Thing (single highest-leverage change) → Would I use it? (Yes/No, no hedging).
+
+**How it works.** Detects input type and gathers just enough context (no over-research — taste is fast). Runs a named anti-pattern scan covering visual tells (centered-Tailwind-UI hero, glassmorphism overuse, generic gradients, 3×2 feature card grid, "Trusted by" logo theater, rounded-2xl everything), copy tells ("The platform for modern teams", "Effortlessly", "AI-powered", apology microcopy), interaction tells (cookie banner the size of a 747, smooth-scroll hijacking, parallax for the sake of parallax), and product anti-patterns (parity features, settings as design escape valve, "Pro" tiers with 11 "unlimited" bullets). References taste-makers by specific decision, never just by brand. No diplomacy theater, no hedged "could potentially," no "modernize the design" advice.
+
+**Example.**
+
+```
+/taste https://acme.com
+```
+
+*Verdict: **GENERIC**. The Tells: Tailwind UI centered-hero template, pink-to-purple gradient doing nothing, six-card 3×2 feature grid, 14px Inter body on 1440px, "The modern platform for high-performing teams" tagline. The Cuts: kill the "Book a demo" CTA, replace the feature grid with one product screenshot and a paragraph, delete the gradient. The Steals: Linear's pricing page hierarchy (three plans, one paragraph each); Mercury's editorial typography on a B2B site; Vercel's monospaced numerals. The One Thing: cut the second CTA. Would I use it? Not unless you fix the hero in the next 48 hours.*
 
 ---
 
@@ -499,11 +522,12 @@ Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/
 
 ```
 plugins/jaequery/
-└── skills/                      ← all 17 slash commands
+└── skills/                      ← all 18 slash commands
     ├── next-feature/
     ├── dda/
     ├── code-review/
     ├── code-audit/
+    ├── taste/
     ├── shark-tank/
     ├── git-audit/
     ├── seo/
