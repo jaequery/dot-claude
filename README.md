@@ -1,6 +1,6 @@
 # dot-claude
 
-My personal Claude Code arsenal — 20 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, `/market` competitor + voice-of-customer pass, Reddit marketing, runtime debug-trace, `/finish` for shipping stuck 90%-done projects, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
+My personal Claude Code arsenal — 21 custom slash-command skills published as a **Claude Code plugin marketplace**. Built to turn Claude from a clever assistant into an opinionated SOP runner: Paul Graham startup playbook, Deep Dive Analysis expert panel, next-feature tournament, evidence-gated code review, opinionated design/product taste critique, Shark Tank evaluation, git audit, SEO suite, market research, `/market` competitor + voice-of-customer pass, Reddit marketing, runtime debug-trace, `/finish` for shipping stuck 90%-done projects, `/narrate` for macOS text-to-speech summaries of Claude's responses, and more. The 161 specialist subagents live in the companion **[supabuild](https://github.com/jaequery/supabuild)** plugin.
 
 ## Install
 
@@ -103,6 +103,7 @@ A sequenced, zero-to-one operating system:
 
 - [`/cmux-diff`](#cmux-diff) — Sidebar diff viewer for the current repo.
 - [`/debug-trace`](#debug-trace) — Cursor-style AI debug mode: injects fire-and-forget HTTP probes into source, captures runtime values via a local daemon, removes every probe before exit.
+- [`/narrate`](#narrate) — macOS text-to-speech: reads a short summary of each completed turn aloud. Opt-in, self-installs a `Stop` hook into your own settings (macOS only).
 
 ---
 
@@ -556,6 +557,28 @@ find reddit posts about notion alternatives in the last 3 days and draft comment
 
 ---
 
+### `/narrate`
+
+**What it does.** Reads a short summary of each of Claude's responses aloud using macOS text-to-speech. When ON, a `Stop` hook fires whenever Claude finishes a turn, pulls the final message from the session transcript, strips markdown, trims it to a sentence-bounded blurb, and speaks it via the `say` command.
+
+**When to use.** You want to step away from the screen while Claude works and still hear when (and roughly what) it finished — or you just prefer an audible completion cue over watching the terminal. macOS only.
+
+**How to invoke.** `/narrate on` / `/narrate off`, or `/narrate status`, `/narrate voice "Karen"`, `/narrate voices`, `/narrate length 150`, `/narrate test`, `/narrate uninstall`. Also fires on *"narrate my responses"*, *"speak my responses"*, *"read responses out loud"*, *"mute the voice"*.
+
+**What you get.** A global, opt-in spoken summary after every completed turn. `on` is self-contained: it copies the engine to a stable path (`~/.claude/narrate-engine.sh`) and merges a `Stop` hook into **your own** `~/.claude/settings.json`. The plugin ships no global hook — nothing runs for anyone until they opt in. Voice defaults to Samantha; point it at a downloaded **Premium** (neural) voice for higher quality.
+
+**How it works.** The skill is a thin front-end over a bundled control script (`scripts/narrate`). The engine (`scripts/speak-on-stop.sh`) is gated three ways so it never misfires: it exits instantly when the toggle file is absent or `say` is unavailable (clean no-op off-Mac), only speaks fresh content, and de-dupes on a content hash so the same message is never spoken twice. Requires `jq`.
+
+**Example.**
+
+```
+/narrate on
+```
+
+*Installs the `Stop` hook into your settings, then speaks a one- or two-sentence summary at the end of every turn — e.g. "Renamed it to slash narrate. The skill is wired and the old slash talk is gone." `/narrate voice "Karen"` switches to the Australian voice; `/narrate off` mutes it; `/narrate uninstall` removes the hook entirely.*
+
+---
+
 ## Subagent roster
 
 This plugin ships **skills only**. The 161 specialist subagents the skills dispatch — Reality Checker, Code Reviewer, Brand Guardian, Sales Coach, TikTok Strategist, Backend Architect, etc. — live in the companion [`jaequery/supabuild`](https://github.com/jaequery/supabuild) plugin. Install supabuild alongside this one and Claude resolves agent names automatically across both plugins.
@@ -568,7 +591,7 @@ Without supabuild installed, the dispatching skills (`/dda`, `/next-feature`, `/
 
 ```
 plugins/jaequery/
-└── skills/                      ← all 20 slash commands
+└── skills/                      ← all 21 slash commands
     ├── next-feature/
     ├── dda/
     ├── code-review/
@@ -581,6 +604,7 @@ plugins/jaequery/
     ├── marketing-reddit/
     ├── cmux-diff/
     ├── debug-trace/
+    ├── narrate/                 ← macOS TTS (ships scripts/ + opt-in Stop hook)
     └── startup-*/               ← six-skill Paul Graham playbook
 ```
 

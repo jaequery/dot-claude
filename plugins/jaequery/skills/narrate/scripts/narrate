@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# narrate — control the spoken-summary Stop hook (the /narrate skill). macOS only.
+#
+#   narrate on            install + enable the Stop hook in YOUR ~/.claude/settings.json
+#   narrate off           mute (leaves the hook installed but inert)
+#   narrate status        show state + voice + length cap + install/wiring status
+#   narrate voice <name>  set the voice (e.g. "Ava (Premium)")
+#   narrate voices        list installed English voices
+#   narrate length <n>    max characters spoken per turn (default 300)
+#   narrate test          speak a sample line in the current voice
+#   narrate uninstall     remove the Stop hook + engine copy
+#
+# `on` is opt-in and self-contained: it copies the engine to a stable path
+# (~/.claude/narrate-engine.sh) and merges a Stop hook into your settings.json.
+# The plugin itself ships NO global hook — nothing runs until you opt in.
+
+set -u
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENGINE_SRC="$SELF_DIR/speak-on-stop.sh"
+ENGINE_DST="$HOME/.claude/narrate-engine.sh"
+SETTINGS="$HOME/.claude/settings.json"
+TOGGLE="$HOME/.claude/narrate.enabled"
+VOICEF="$HOME/.claude/narrate.voice"
+MAXF="$HOME/.claude/narrate.maxchars"
+
+cur_voice() { cat "$VOICEF" 2>/dev/null || echo "Samantha"; }
+cur_max()   { cat "$MAXF"   2>/dev/null || echo "300"; }
+engine_installed() { [ -x "$ENGINE_DST" ]; }
+hook_wired() {
+  jq -e '.hooks.Stop[]?.hooks[]? | select((.command//"")|test("narrate-engine"))' \
+    "$SETTINGS" >/dev/null 2>&1
+}
+
+install_hook() {
+  mkdir -p "$HOME/.claude"
+  cp "$ENGINE_SRC" "$ENGINE_DST" && chmod +x "$ENGINE_DST"   # always refresh on `on`
+  [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+  local tmp; tmp="$(mktemp)"
+  jq --arg cmd '$HOME/.claude/narrate-engine.sh' '
+    .hooks = (.hooks // {})
+    | .hooks.Stop = (.hooks.Stop // [])
+    | if any(.hooks.Stop[]?.hooks[]?; (.command // "") | test("narrate-engine"))
+      then .
+      else .hooks.Stop += [ { "hooks": [ { "type":"command", "command":$cmd, "timeout":15 } ] } ]
+      end
+  ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+}
+
+uninstall_hook() {
+  if [ -f "$SETTINGS" ]; then
+    local tmp; tmp="$(mktemp)"
+    jq '
+      if (.hooks.Stop?) then
+          .hooks.Stop |= ( map( .hooks |= map(select((.command//"")|test("narrate-engine")|not)) )
+                           | map(select((.hooks|length) > 0)) )
+      else . end
+    ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+  fi
+  rm -f "$ENGINE_DST" "$TOGGLE"
+}
+
+case "${1:-status}" in
+  on)
+    [ "$(uname)" = "Darwin" ] || echo "Note: narrate uses macOS 'say' — it will be silent on this platform."
+    install_hook
+    touch "$TOGGLE"
+    echo "narrate: ON  (voice: $(cur_voice), max: $(cur_max) chars)"
+    if hook_wired; then
+      echo "stop hook: installed in ~/.claude/settings.json → ~/.claude/narrate-engine.sh"
+    else
+      echo "WARNING: failed to wire the Stop hook (is jq installed?)"
+    fi
+    echo "(A new Stop hook is picked up live if settings.json existed at session start; otherwise open /hooks once or restart.)"
+    ;;
+  off)
+    rm -f "$TOGGLE"
+    echo "narrate: OFF  (hook left installed but inert; 'narrate uninstall' removes it entirely)"
+    ;;
+  status)
+    if [ -f "$TOGGLE" ]; then echo "narrate: ON"; else echo "narrate: OFF"; fi
+    echo "voice: $(cur_voice)"
+    echo "max chars: $(cur_max)"
+    if engine_installed; then echo "engine: installed (~/.claude/narrate-engine.sh)"; else echo "engine: NOT installed (run 'narrate on')"; fi
+    if hook_wired; then echo "stop hook: wired"; else echo "stop hook: MISSING (run 'narrate on')"; fi
+    ;;
+  voice)
+    if [ -z "${2:-}" ]; then echo "usage: narrate voice <name>"; exit 1; fi
+    mkdir -p "$HOME/.claude"; printf '%s' "$2" > "$VOICEF"
+    echo "voice set to: $2"
+    say -v "$2" "This is the new narration voice." 2>/dev/null || \
+      echo "(note: '$2' may not be installed — run 'narrate voices')"
+    ;;
+  voices)
+    say -v '?' 2>/dev/null | grep -iE 'en_|en-' || echo "(no 'say' on this platform)"
+    ;;
+  length)
+    if [ -z "${2:-}" ]; then echo "usage: narrate length <n>"; exit 1; fi
+    mkdir -p "$HOME/.claude"; printf '%s' "$2" > "$MAXF"
+    echo "max chars set to: $2"
+    ;;
+  test)
+    say -v "$(cur_voice)" "All done. This is a test of the narration voice." 2>/dev/null || \
+      echo "(no 'say' on this platform — narrate is macOS only)"
+    ;;
+  uninstall)
+    uninstall_hook
+    echo "narrate: uninstalled (Stop hook + engine removed; voice/length prefs kept)"
+    ;;
+  *)
+    echo "usage: narrate {on|off|status|voice <name>|voices|length <n>|test|uninstall}"
+    exit 1
+    ;;
+esac
