@@ -7,7 +7,8 @@ description: >
   user's own settings; the plugin ships no global hook. Use when the user says "/narrate",
   "/narrate on", "/narrate off", "narrate on", "narrate off", "narrate my responses",
   "speak my responses", "read responses out loud", "voice on/off", "mute the voice",
-  "set the narration voice", or "stop narrating".
+  "set the narration voice", "stop narrating", "set a personality", "make it funny",
+  "narrate in a funny/serious/sarcastic tone", or "change how it talks".
 ---
 
 # /narrate — speak a summary when Claude finishes (macOS)
@@ -44,8 +45,12 @@ Run the bundled control script and report its output to the user:
   `"$CLAUDE_PLUGIN_ROOT/skills/narrate/scripts/narrate" voice "Ava (Premium)"`.
 - `voices` → list installed English voices.
 - `length <n>` → max characters spoken per turn (default 300).
-- `test` → speak a sample line now.
-- `uninstall` → remove the Stop hook + the engine copy entirely.
+- `personality <tone>` → set the spoken tone (`funny`, `serious`, `pirate`, or any free
+  text); `off` for verbatim. Each line is rewritten in that tone by Apple's on-device
+  model. **Pass multi-word tones as one quoted arg.** First use compiles the helper.
+- `build` → (re)compile the on-device rewrite helper.
+- `test` → speak a sample line now (in the current personality).
+- `uninstall` → remove the Stop hook, engine, and rewriter entirely.
 
 Keep your spoken reply short — the Stop hook will read the start of it aloud.
 
@@ -55,6 +60,13 @@ Keep your spoken reply short — the Stop hook will read the start of it aloud.
 - Voice defaults to **Samantha** (best built-in). For neural quality, download a
   **Premium** voice (System Settings → Accessibility → Spoken Content → Manage Voices),
   then `/narrate voice "Ava (Premium)"`. Siri voices are not accessible to `say`.
+- **Personalities** rewrite each spoken line in a chosen tone using Apple's **on-device
+  Foundation model** (Apple Intelligence) — free, local, ~0.5s, no API key. The shipped
+  Swift helper (`scripts/narrate-rewrite.swift`) is compiled on first use to
+  `~/.claude/narrate-rewrite`. Needs macOS 26 + Apple Intelligence enabled + `swiftc`
+  (Xcode Command Line Tools); without those, personalities cleanly fall back to verbatim.
+  It's a small (~3B) model, so it paraphrases in tone rather than transcribing exactly.
 - Config lives at `~/.claude/narrate.enabled` (toggle), `~/.claude/narrate.voice`,
-  `~/.claude/narrate.maxchars`. Engine copy at `~/.claude/narrate-engine.sh`.
+  `~/.claude/narrate.maxchars`, `~/.claude/narrate.personality`. Engine copy at
+  `~/.claude/narrate-engine.sh`; rewriter at `~/.claude/narrate-rewrite`.
 - Requires `jq` (used to merge the hook and parse the transcript).

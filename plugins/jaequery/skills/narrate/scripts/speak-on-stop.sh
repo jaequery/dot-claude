@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# speak-on-stop.sh — Stop hook engine for the /narrate skill.
-# When Claude finishes a turn, speak a short summary of its final message
-# aloud via macOS `say`. macOS only; a clean no-op anywhere `say` is absent.
+# speak-on-stop.sh — Stop hook engine for the /narrate skill (macOS).
+# When Claude finishes a turn, speak a short summary of its final message aloud
+# via macOS `say`. macOS only; a clean no-op anywhere `say` is absent.
 #
 # Toggle (global on/off): presence of  ~/.claude/narrate.enabled
-# Voice override:         contents of   ~/.claude/narrate.voice     (default: Samantha)
-# Length cap (chars):     contents of   ~/.claude/narrate.maxchars  (default: 300)
+# Voice override:         contents of   ~/.claude/narrate.voice         (default: Samantha)
+# Length cap (chars):     contents of   ~/.claude/narrate.maxchars      (default: 300)
+# Personality/tone:       contents of   ~/.claude/narrate.personality   (e.g. "funny";
+#                         empty = verbatim. Rewritten via the on-device Apple model,
+#                         a sibling binary `narrate-rewrite` next to this script.)
 # Installed + managed by the /narrate skill's `narrate` control script.
 
 TOGGLE="$HOME/.claude/narrate.enabled"
@@ -42,23 +45,40 @@ clean="$(printf '%s' "$raw" \
   | sed -E 's/  +/ /g; s/^ //; s/ $//')"
 [ -n "$clean" ] || exit 0
 
-# Keep it short: cap chars, trimmed back to a sentence boundary when possible.
-max="$(cat "$HOME/.claude/narrate.maxchars" 2>/dev/null)"; [ -n "$max" ] || max=300
-if [ "${#clean}" -gt "$max" ]; then
-  head="${clean:0:$max}"
-  trimmed="$(printf '%s' "$head" | sed -E 's/([.!?])[^.!?]*$/\1/')"
-  [ -n "$trimmed" ] && clean="$trimmed" || clean="$head"
-fi
-
-# De-dupe: never speak the same final message twice (e.g. Stop firing on resume).
+# De-dupe on the source message: never narrate the same turn twice (e.g. Stop
+# firing again on resume) — and skip the rewrite call entirely on repeats.
 STATE="$HOME/.claude/.narrate.last"
 hash="$(printf '%s' "$clean" | md5 -q 2>/dev/null || printf '%s' "$clean" | md5sum 2>/dev/null | cut -d' ' -f1)"
 [ -n "$hash" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$hash" ] && exit 0
 printf '%s' "$hash" > "$STATE"
 
-voice="$(cat "$HOME/.claude/narrate.voice" 2>/dev/null)"
-[ -n "$voice" ] || voice="Samantha"
+voice="$(cat "$HOME/.claude/narrate.voice" 2>/dev/null)";       [ -n "$voice" ] || voice="Samantha"
+max="$(cat "$HOME/.claude/narrate.maxchars" 2>/dev/null)";      [ -n "$max" ]   || max=300
+personality="$(cat "$HOME/.claude/narrate.personality" 2>/dev/null)"
+REWRITE="$(cd "$(dirname "$0")" && pwd)/narrate-rewrite"
 
-# Speak in the background so the hook returns instantly.
-/usr/bin/say -v "$voice" "$clean" >/dev/null 2>&1 &
+# Trim verbatim to a sentence boundary within the char cap. Used as-is when no
+# personality is set, and as the fallback if the rewrite is unavailable/fails.
+trim() {
+  local s="$1"
+  if [ "${#s}" -gt "$max" ]; then
+    local h="${s:0:$max}" t
+    t="$(printf '%s' "$h" | sed -E 's/([.!?])[^.!?]*$/\1/')"
+    [ -n "$t" ] && s="$t" || s="$h"
+  fi
+  printf '%s' "$s"
+}
+
+# Speak asynchronously so the hook returns instantly. When a personality is set,
+# rewrite the line with Apple's on-device model first (free, local, ~0.5s warm);
+# fall back to the verbatim summary if that's unavailable or returns nothing.
+{
+  spoken="$(trim "$clean")"
+  if [ -n "$personality" ] && [ -x "$REWRITE" ]; then
+    r="$(printf '%s' "${clean:0:1200}" | "$REWRITE" "$personality" 2>/dev/null \
+         | tr -d '`*_#"' | sed -E 's/  +/ /g; s/^ //; s/ $//')"
+    [ -n "$r" ] && spoken="$r"
+  fi
+  /usr/bin/say -v "$voice" "$spoken"
+} >/dev/null 2>&1 &
 exit 0

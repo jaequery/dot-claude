@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # narrate — control the spoken-summary Stop hook (the /narrate skill). macOS only.
 #
-#   narrate on            install + enable the Stop hook in YOUR ~/.claude/settings.json
-#   narrate off           mute (leaves the hook installed but inert)
-#   narrate status        show state + voice + length cap + install/wiring status
-#   narrate voice <name>  set the voice (e.g. "Ava (Premium)")
-#   narrate voices        list installed English voices
-#   narrate length <n>    max characters spoken per turn (default 300)
-#   narrate test          speak a sample line in the current voice
-#   narrate uninstall     remove the Stop hook + engine copy
+#   narrate on                install + enable the Stop hook in YOUR ~/.claude/settings.json
+#   narrate off               mute (leaves the hook installed but inert)
+#   narrate status            show state + voice + length + personality + install status
+#   narrate voice <name>      set the voice (e.g. "Ava (Premium)")
+#   narrate voices            list installed English voices
+#   narrate length <n>        max characters spoken per turn (default 300)
+#   narrate personality <t>   set spoken tone (e.g. "funny", "serious", "pirate");
+#                             `off` to speak verbatim. Rewrites via the on-device Apple
+#                             Intelligence model (free, local; needs macOS 26 + swiftc).
+#   narrate build             (re)compile the on-device rewrite helper
+#   narrate test              speak a sample line (in the current personality)
+#   narrate uninstall         remove the Stop hook + engine + rewriter
 #
 # `on` is opt-in and self-contained: it copies the engine to a stable path
 # (~/.claude/narrate-engine.sh) and merges a Stop hook into your settings.json.
@@ -19,17 +23,33 @@ set -u
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENGINE_SRC="$SELF_DIR/speak-on-stop.sh"
 ENGINE_DST="$HOME/.claude/narrate-engine.sh"
+REWRITE_SRC="$SELF_DIR/narrate-rewrite.swift"
+REWRITE_DST="$HOME/.claude/narrate-rewrite"          # sibling of ENGINE_DST
 SETTINGS="$HOME/.claude/settings.json"
 TOGGLE="$HOME/.claude/narrate.enabled"
 VOICEF="$HOME/.claude/narrate.voice"
 MAXF="$HOME/.claude/narrate.maxchars"
+PERSF="$HOME/.claude/narrate.personality"
 
 cur_voice() { cat "$VOICEF" 2>/dev/null || echo "Samantha"; }
 cur_max()   { cat "$MAXF"   2>/dev/null || echo "300"; }
+cur_pers()  { cat "$PERSF"  2>/dev/null || echo "off (verbatim)"; }
 engine_installed() { [ -x "$ENGINE_DST" ]; }
 hook_wired() {
   jq -e '.hooks.Stop[]?.hooks[]? | select((.command//"")|test("narrate-engine"))' \
     "$SETTINGS" >/dev/null 2>&1
+}
+
+# Compile the Swift rewrite helper to the stable sibling path if missing/stale.
+# Returns non-zero (with a note) if swiftc is absent or the build fails — in that
+# case personalities simply no-op to the verbatim summary.
+build_rewrite() {
+  [ -f "$REWRITE_SRC" ] || { echo "(rewriter source missing)"; return 1; }
+  mkdir -p "$HOME/.claude"
+  if [ -x "$REWRITE_DST" ] && [ ! "$REWRITE_SRC" -nt "$REWRITE_DST" ]; then return 0; fi
+  command -v swiftc >/dev/null 2>&1 || { echo "(swiftc not found — install Xcode Command Line Tools to enable personalities)"; return 1; }
+  swiftc -O -parse-as-library "$REWRITE_SRC" -o "$REWRITE_DST" 2>/dev/null || { echo "(failed to compile the on-device rewriter)"; return 1; }
+  return 0
 }
 
 install_hook() {
@@ -57,7 +77,7 @@ uninstall_hook() {
       else . end
     ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
   fi
-  rm -f "$ENGINE_DST" "$TOGGLE"
+  rm -f "$ENGINE_DST" "$REWRITE_DST" "$TOGGLE"
 }
 
 case "${1:-status}" in
@@ -65,7 +85,7 @@ case "${1:-status}" in
     [ "$(uname)" = "Darwin" ] || echo "Note: narrate uses macOS 'say' — it will be silent on this platform."
     install_hook
     touch "$TOGGLE"
-    echo "narrate: ON  (voice: $(cur_voice), max: $(cur_max) chars)"
+    echo "narrate: ON  (voice: $(cur_voice), max: $(cur_max) chars, personality: $(cur_pers))"
     if hook_wired; then
       echo "stop hook: installed in ~/.claude/settings.json → ~/.claude/narrate-engine.sh"
     else
@@ -81,7 +101,11 @@ case "${1:-status}" in
     if [ -f "$TOGGLE" ]; then echo "narrate: ON"; else echo "narrate: OFF"; fi
     echo "voice: $(cur_voice)"
     echo "max chars: $(cur_max)"
+    echo "personality: $(cur_pers)"
     if engine_installed; then echo "engine: installed (~/.claude/narrate-engine.sh)"; else echo "engine: NOT installed (run 'narrate on')"; fi
+    if [ -x "$REWRITE_DST" ]; then echo "rewriter: built (on-device Apple model)"
+    elif [ -f "$REWRITE_SRC" ]; then echo "rewriter: not built (set a personality, or run 'narrate build')"
+    else echo "rewriter: source missing"; fi
     if hook_wired; then echo "stop hook: wired"; else echo "stop hook: MISSING (run 'narrate on')"; fi
     ;;
   voice)
@@ -99,16 +123,40 @@ case "${1:-status}" in
     mkdir -p "$HOME/.claude"; printf '%s' "$2" > "$MAXF"
     echo "max chars set to: $2"
     ;;
+  personality)
+    if [ -z "${2:-}" ]; then echo "personality: $(cur_pers)"; exit 0; fi
+    case "$2" in
+      off|none|clear|verbatim)
+        rm -f "$PERSF"; echo "personality: off (speaking verbatim)"
+        ;;
+      *)
+        mkdir -p "$HOME/.claude"; printf '%s' "$2" > "$PERSF"
+        echo "personality set to: $2"
+        if build_rewrite; then
+          s="$(printf '%s' "I just set up the narration personality, and everything is working." | "$REWRITE_DST" "$2" 2>/dev/null)"
+          [ -n "$s" ] && say -v "$(cur_voice)" "$s" 2>/dev/null || echo "(set, but the on-device model returned nothing — narration will fall back to verbatim)"
+        fi
+        ;;
+    esac
+    ;;
+  build)
+    if build_rewrite; then echo "rewriter built: $REWRITE_DST"; else echo "build failed (needs swiftc + macOS 26 Apple Intelligence)"; fi
+    ;;
   test)
-    say -v "$(cur_voice)" "All done. This is a test of the narration voice." 2>/dev/null || \
-      echo "(no 'say' on this platform — narrate is macOS only)"
+    line="All done. This is a test of the narration voice."
+    pers="$(cat "$PERSF" 2>/dev/null)"
+    if [ -n "$pers" ] && build_rewrite; then
+      r="$(printf '%s' "I just finished a small task and everything is working as expected." | "$REWRITE_DST" "$pers" 2>/dev/null)"
+      [ -n "$r" ] && line="$r"
+    fi
+    say -v "$(cur_voice)" "$line" 2>/dev/null || echo "(no 'say' on this platform — narrate is macOS only)"
     ;;
   uninstall)
     uninstall_hook
-    echo "narrate: uninstalled (Stop hook + engine removed; voice/length prefs kept)"
+    echo "narrate: uninstalled (Stop hook + engine + rewriter removed; voice/length/personality prefs kept)"
     ;;
   *)
-    echo "usage: narrate {on|off|status|voice <name>|voices|length <n>|test|uninstall}"
+    echo "usage: narrate {on|off|status|voice <name>|voices|length <n>|personality <tone>|build|test|uninstall}"
     exit 1
     ;;
 esac
